@@ -277,6 +277,14 @@ The device has no power button: plugging in the power cable turns it on, unplugg
 
 **The screen stays black; that's normal.** EDL mode shows nothing.
 
+**There is a more reliable route while the stock system still boots**: the stock ROM is `userdebug`, with root and adb, so
+
+```bash
+adb reboot edl
+```
+
+enters EDL directly, with no need to time the volume buttons. Measured on this device the physical button sequence often fails to take (the timing between holding the buttons and applying power is hard to hit), while `adb reboot edl` worked first try. This is unavailable once the postmarketOS bootstrap is flashed — the bootstrap has no adb, for the reason documented in [A5](#a5-log-in-to-the-bootstrap-over-ssh) under the missing USB device controller.
+
 Check that the computer sees the device:
 
 - macOS: `ioreg -p IOUSB | grep -i -E "qhsusb|qusb|9008"` should show `QUSB__BULK` or `QHSUSB__BULK`. On Apple Silicon Macs, click "Allow" when asked "Allow accessory to connect?".
@@ -435,6 +443,62 @@ If it fails:
 - The screen stays on lk2nd (it says fastboot): the bootstrap wasn't flashed correctly; go back to A1, enter EDL, redo A4.
 - Windows can't use the USB network (untested): use Wi-Fi instead. As upstream does on Windows, use upstream's script `sources/scripts/prepare-pmos-ssh-bootstrap-image.sh` in WSL to write the Wi-Fi name and password into the bootstrap image (usage in Stage 0 of upstream [FLASHING.md](https://github.com/rickx/ubuntu-thinksmart/blob/main/FLASHING.md)), go back to A1 and redo A4 with this new image, then after boot find the IP of host `thinksmarter` in the router and `ssh pmos@<IP>`. Or borrow a macOS or Linux computer for this one step.
 
+#### The USB network may not be establishable at all on this bootstrap
+
+Check whether it can work before spending time on it. Log in on the device screen and run:
+
+```
+ls /sys/class/udc/
+```
+
+**An empty directory means it cannot**: the kernel registered no USB device controller, so `usb0` cannot exist. No manual IP setting, cable swap or different host OS will produce `172.16.42.x`, and adb fails for the same reason. Measured on one CD-18781Y this directory was empty, and everything from here on had to go over Wi-Fi.
+
+#### `/etc/machine-id` is empty and takes down dbus and NetworkManager in a chain
+
+Upstream deliberately zeroes this file when building the image (`/usr/local/share/bootstrap/BOOTSTRAP-NEXT-STEPS.txt` states "machine-id were removed from the source image"). The result is a run of boot errors:
+
+```
+* dbus: status: stopped
+ERROR: cannot start networkmanager as dbus would not start
+ERROR: cannot start q6voiced as dbus would not start
+```
+
+Writing back a valid 32-hex-digit ID restores it:
+
+```bash
+sudo -s
+mount -o remount,rw /
+dbus-uuidgen --put
+cp /var/lib/dbus/machine-id /etc/machine-id
+wc -c /etc/machine-id
+reboot
+```
+
+`wc -c` should print `32`. Do not use `uuidgen > /etc/machine-id`: its output is 36 characters with 4 dashes, which dbus rejects, and dbus stays stopped. After the reboot `rc-service dbus status` should read `running` and NetworkManager starts with it. Note the OpenRC service name is all-lowercase `networkmanager`; `rc-service NetworkManager status` reports `does not exist`.
+
+#### Typing on the on-screen keyboard
+
+This on-screen keyboard cannot produce `|`, and quotes often fail too. Prefer commands with no pipes, quotes or `$(...)`. `Tab` only moves focus inside `nmtui`; at the shell prompt it triggers command-name completion and floods the screen with hundreds of entries — nothing went wrong.
+
+#### Use Wi-Fi instead (works on macOS and Linux too, not only Windows)
+
+```bash
+sudo nmcli device wifi rescan
+sudo nmcli device wifi list
+sudo nmcli device wifi connect "SSID" password "password"
+sudo nmcli device status
+```
+
+Three pitfalls hit in practice:
+
+- `802-11-wireless-security.key-mgmt: property is missing` is not a wrong password — the scan cache was still empty, so NM could not infer the security type. Run `rescan`, wait ~5 seconds, confirm the network appears in `list`, then connect.
+- `nmtui` activation fails with `not authorized to control networking`: a polkit refusal, because this bootstrap is reached through tty1 `login` and has no logind seat session. Run it as root with `sudo`; polkit does not gate root.
+- With several APs sharing one SSID, `connect` may need `bssid <MAC>` to disambiguate.
+
+`nmcli device wifi connect` does not accept long property arguments such as `802-11-wireless-security.key-mgmt` (that syntax belongs to `nmcli connection add`) and reports `invalid extra argument`.
+
+Afterwards get the IP from `sudo nmcli device status`, or find host `thinksmarter` in the router's DHCP list.
+
 ### A6. Rewrite the partition table (ask the owner first, irreversible)
 
 In the SSH session on the bootstrap, run:
@@ -477,6 +541,26 @@ Expected: a single `system:` line with `Length 0x00000001b3cfbe00`, and no `user
 
 If `system` is still `0x0000000060000000`: the partition table wasn't rewritten; go back to A4 (lk2nd is already in place, no need to redo A3).
 
+#### `persist` missing from `printgpt` does not mean the partition is gone
+
+edl 3.62 printed only 24 of the 25 entries in the new table on this device, and **the one it dropped was `persist`, which sits at the very end of the disk**. `persist` holds the serial number and calibration data, so this omission is easy to misread as A6 having corrupted the table. Read the raw sectors to settle it:
+
+```bash
+edl rs 1 34 gpt-head.bin          # GPT header + primary partition array
+edl rs 15269855 33 gpt-backup.bin # backup GPT
+```
+
+Two offset traps when decoding `edl rs` output: byte 0 of the file is **LBA 1** (not LBA 0), so the partition array starts at `(partition_entry_lba - 1) * 512`; and entry names are **UTF-16LE**, while `strings` on macOS has no `-el` flag — decode it in Python.
+
+Against the A6 layout the correct result is **25 non-empty entries**, of which:
+
+| Entry | start | end | bytes |
+| --- | --- | --- | --- |
+| `p24 system` | 923648 | 15204318 | 7311703552 (`0x1b3cfbe00`) |
+| `p27 persist` | 15204319 | 15269854 | 33554432 (32 MB) |
+
+Primary and backup tables must be **identical**, and no entry may extend past the end of the disk at 15269888 sectors. A fresh primary with a stale backup is the classic cause of a partition table being rolled back on boot on Qualcomm devices, so this 17 KB read is worth doing.
+
 ### A8. Flash this image (ask the owner first)
 
 ```bash
@@ -491,6 +575,7 @@ If it fails:
 
 - `Error: … has N sectors but partition only has 3145728.`: the partition table is still stock; go back to A7 and check.
 - Error halfway through: enter EDL again and retry once; if it still fails, stop and give `flash-system.log` to the owner.
+- `edl reset` reports `DeviceClass - USBError(5, 'Input/Output Error')` with no `Reset succeeded.`: on this device that happens **every time**, including after flashing just the bootstrap (A4). To tell whether the reset actually took, look at the computer — if `ioreg -p IOUSB | grep -i qusb` comes back empty and the device has left the bus, it did reset and the data is already on the flash. Just power-cycle it by hand; **do not reflash**.
 
 When done, unplug the USB cable and go to [step 2: first boot](#2-first-boot-and-setup).
 
@@ -652,7 +737,7 @@ Try in this order:
 
 1. Make sure the device really is in EDL: black screen, and the computer shows `9008` / `QUSB__BULK` (see 1.1).
 2. Use another cable **that carries data**. Many cables only charge.
-3. Plug straight into the computer, not a dock, hub or monitor port.
+3. Try plugging straight into the computer first, avoiding a dock, hub or monitor port. **But some units are only detected through a hub**: measured on one CD-18781Y, a C-to-C direct connection to the computer was not seen at all (neither the stock system nor EDL), while plugging it into a USB hub enumerated immediately. This device's USB-C does not do CC negotiation correctly, so a missing direct connection is a device-side issue, not a bad cable — if direct fails, try a hub.
 4. Unplug both the USB cable and the power cable to cut the power, then enter EDL again as in 1.1. EDL often needs re-entering after sitting idle for a while or after a failed command.
 5. Linux: make sure ModemManager is stopped (`systemctl status ModemManager`) and the udev rules are installed; otherwise use `sudo`.
 6. Windows (untested): if the device still has an exclamation mark in Device Manager, install WinUSB with Zadig as in 1.1. If Qualcomm's own 9008 driver is installed, edl can also use the serial port with `--serial` (`edl --serial printgpt`).
@@ -876,7 +961,9 @@ Boot order: Qualcomm PBL → stock SBL/aboot → lk2nd in the `boot` partition �
 
 **Known issue: the flashed system currently can't be reached over a USB cable.** The image's USB network is already set to NCM (device `172.16.42.1`; upstream's device package defaults to RNDIS, which macOS doesn't support), but once the system is up the device's USB port isn't recognized by the computer (it doesn't show up in the computer's USB device list), and switching back to RNDIS doesn't change that: the USB port doesn't come up in device mode. Not fixed yet.
 
-So after flashing, connect the device to Wi-Fi and log in over its Wi-Fi address. The USB network during the bootstrap ([A5](#a5-log-in-to-the-bootstrap-over-ssh)) is not affected and works as described.
+So after flashing, connect the device to Wi-Fi and log in over its Wi-Fi address.
+
+The USB network during the bootstrap ([A5](#a5-log-in-to-the-bootstrap-over-ssh)) is **not guaranteed to work**. This section used to say it was unaffected and worked as described; measurement says otherwise: on one CD-18781Y, `ls /sys/class/udc/` was an empty directory under the bootstrap, meaning the kernel registered no USB device controller, so `usb0` could not exist and the computer saw no device at all — the same root cause as after flashing (the USB port never enters device mode). How to check and switch to Wi-Fi is in [A5](#a5-log-in-to-the-bootstrap-over-ssh).
 
 ### System changes in this image
 

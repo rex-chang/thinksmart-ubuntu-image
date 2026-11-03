@@ -277,6 +277,14 @@ shasum -a 256 -c --ignore-missing SHA256SUMS
 
 **屏幕保持黑屏是正常的**，EDL 模式没有任何显示。
 
+**原厂系统还能开机时，有一条更可靠的路**：原厂系统是 `userdebug`，带 root 和 adb，直接
+
+```bash
+adb reboot edl
+```
+
+就能进 EDL，不用掐音量键的时机。实测在这台设备上，实体按键序列经常进不去（按住键再插电的时机很难对齐），`adb reboot edl` 一次就成。已经刷成 postmarketOS bootstrap 之后这条不能用 —— bootstrap 里没有 adb，原因见 [A5](#a5-ssh-登录-bootstrap) 里 USB 设备控制器缺失那一节。
+
 检查电脑认到了设备：
 
 - macOS：`ioreg -p IOUSB | grep -i -E "qhsusb|qusb|9008"`，期望看到 `QUSB__BULK` 或 `QHSUSB__BULK`。Apple Silicon 的 Mac 弹出「允许配件连接？」要点「允许」。
@@ -435,6 +443,62 @@ ls /usr/local/sbin/apply-ubuntu-gpt.sh
 - 屏幕停在 lk2nd 的界面（写着 fastboot）：bootstrap 没刷好，回到 A1 重新进 EDL，重做 A4。
 - Windows 连不上 USB 网络（未实测）：改走 WiFi。照上游的 Windows 做法，在 WSL 里用上游脚本 `sources/scripts/prepare-pmos-ssh-bootstrap-image.sh` 把 WiFi 名和密码写进 bootstrap 镜像（用法见上游 [FLASHING.md](https://github.com/rickx/ubuntu-thinksmart/blob/main/FLASHING.md) 的 Stage 0），回到 A1 重刷 A4 用这个新镜像，开机后在路由器里找主机名 `thinksmarter` 的 IP，`ssh pmos@<IP>`。也可以只在这一步借一台 macOS 或 Linux 电脑。
 
+#### USB 网络在这台 bootstrap 上可能根本建立不起来
+
+先确认它有没有可能工作，别在修不好的东西上花时间。设备屏幕上登录后执行：
+
+```
+ls /sys/class/udc/
+```
+
+**空目录就是死路**：内核没注册任何 USB 设备控制器，`usb0` 建不出来。此时电脑侧无论怎么手动设 IP、换线、换操作系统都不会出现 `172.16.42.x`，adb 同样连不上（同一个原因）。实测有一台 CD-18781Y 就是这样，`printgpt` 之后一路只能靠 WiFi。
+
+#### `/etc/machine-id` 是空的，会连锁压垮 dbus 和 NetworkManager
+
+上游打包时故意清空了这个文件（`/usr/local/share/bootstrap/BOOTSTRAP-NEXT-STEPS.txt` 里写明 "machine-id were removed from the source image"），后果是开机日志里成串的错误：
+
+```
+* dbus: status: stopped
+ERROR: cannot start networkmanager as dbus would not start
+ERROR: cannot start q6voiced as dbus would not start
+```
+
+填回一个合法的 32 位十六进制 ID 就能恢复：
+
+```bash
+sudo -s
+mount -o remount,rw /
+dbus-uuidgen --put
+cp /var/lib/dbus/machine-id /etc/machine-id
+wc -c /etc/machine-id
+reboot
+```
+
+`wc -c` 期望是 `32`。不要用 `uuidgen > /etc/machine-id`：它的输出带 4 个连字符、共 36 字符，dbus 不接受，改完 dbus 照旧起不来。重启后 `rc-service dbus status` 应为 `running`，NetworkManager 会随之启动（注意 OpenRC 里的服务名是全小写 `networkmanager`，`rc-service NetworkManager status` 会报 `does not exist`）。
+
+#### 在设备屏幕上打字的限制
+
+这块屏幕键盘打不出 `|`，引号也经常无效。所以照抄本节的命令时，优先选不含管道、引号和 `$(...)` 的写法。`Tab` 只在 `nmtui` 界面里移动焦点；在 shell 提示符下按 `Tab` 会触发命令名补全，刷出上百行，看着像出错其实什么都没发生。
+
+#### 改走 WiFi（macOS / Linux 同样适用，不必等到 Windows）
+
+```bash
+sudo nmcli device wifi rescan
+sudo nmcli device wifi list
+sudo nmcli device wifi connect "WiFi名" password "WiFi密码"
+sudo nmcli device status
+```
+
+三个实测会撞上的坑：
+
+- 报 `802-11-wireless-security.key-mgmt: property is missing`：不是密码错，是扫描缓存还空着，NM 推不出加密方式。先 `rescan` 等 5 秒、确认网络出现在 `list` 里，再连。
+- `nmtui` 里激活连接报 `not authorized to control networking`：polkit 拒绝 —— 这个 bootstrap 从 tty1 的 `login` 进来，没有 logind seat 会话。加 `sudo` 以 root 执行即可，root 不受 polkit 管。
+- 同一个 SSID 有多个 AP 时，`connect` 可能需要 `bssid <MAC>` 消歧。
+
+`nmcli device wifi connect` 不接受 `802-11-wireless-security.key-mgmt` 这类长属性写法（那是 `nmcli connection add` 的语法），会报 `invalid extra argument`。
+
+连上后 IP 用 `sudo nmcli device status` 看，或者在路由器 DHCP 列表里找主机名 `thinksmarter`。
+
 ### A6. 改分区表（先问用户，不可逆）
 
 在 bootstrap 的 SSH 里运行：
@@ -477,6 +541,26 @@ grep -E "^(system|userdata):" gpt-after.txt
 
 如果 `system` 仍然是 `0x0000000060000000`：分区表没改成功，回到 A4 重来（lk2nd 已经刷过，A3 不用重做）。
 
+#### `printgpt` 不列 `persist` 不等于分区丢了
+
+edl 3.62 在这台设备上只打印出新表 25 条条目里的 24 条，**漏掉的正好是位于磁盘末尾的 `persist`**。`persist` 存的是序列号和校准数据，看到它不见很容易误判成 A6 写坏了。用原始扇区读取来定性：
+
+```bash
+edl rs 1 34 gpt-head.bin          # GPT 头 + 主分区数组
+edl rs 15269855 33 gpt-backup.bin # 备份 GPT
+```
+
+读 `edl rs` 的结果时注意两个偏移陷阱：文件第 0 个字节是 **LBA 1**（不是 LBA 0），所以分区数组在 `(partition_entry_lba - 1) * 512` 处；条目里的名字是 **UTF-16LE**，macOS 自带的 `strings` 不支持 `-el`，用 Python 解。
+
+按 A6 的布局，正确结果是 **25 条非空条目**，其中：
+
+| 条目 | start | end | 字节数 |
+| --- | --- | --- | --- |
+| `p24 system` | 923648 | 15204318 | 7311703552（`0x1b3cfbe00`） |
+| `p27 persist` | 15204319 | 15269854 | 33554432（32 MB） |
+
+主表和备份表的条目必须**完全一致**，并且没有任何条目越过盘尾的 15269888 扇区。「主表新、备份表旧」是高通设备上分区表开机被回滚的经典原因，值得花这 17 KB 的读取确认一下。
+
 ### A8. 刷本镜像（先问用户）
 
 ```bash
@@ -491,6 +575,7 @@ edl reset
 
 - `Error: … has N sectors but partition only has 3145728.`：分区表还是原厂的，回 A7 检查。
 - 写到一半报错：重新进 EDL 重试一次；仍失败就停下来，把 `flash-system.log` 给用户。
+- `edl reset` 报 `DeviceClass - USBError(5, 'Input/Output Error')`、没有 `Reset succeeded.`：实测在这台设备上**每次**都会这样，包括只刷 bootstrap（A4）的时候。判断复位有没有生效看电脑侧 —— `ioreg -p IOUSB | grep -i qusb` 空了、设备从总线消失，就是已经复位，数据也已经落盘。这时手动拔插电源即可，**不要重刷**。
 
 写完后拔掉 USB 线，进入[第 2 步：首次开机](#2-首次开机和设置)。
 
@@ -652,7 +737,7 @@ journalctl -u thinksmart-client -b --no-pager | tail -30
 
 1. 确认设备真在 EDL：屏幕全黑，电脑上能看到 `9008` / `QUSB__BULK`（见 1.1）。
 2. 换一根**能传数据**的线。很多充电线只能充电。
-3. 直接插电脑本体，别经过扩展坞、Hub、显示器上的口。
+3. 先试直接插电脑本体，别经过扩展坞、Hub、显示器上的口。**但有些设备只能经过 Hub 才认**：实测有一台 CD-18781Y 用 C-to-C 直连电脑完全读不到（原厂系统和 EDL 模式都读不到），插到 USB Hub 上立刻枚举。这台设备的 USB-C 没做正确的 CC 协商，直连不认是设备侧的问题，不是线坏了 —— 直连不行就换 Hub 再试。
 4. 拔掉 USB 线和电源线让设备断电，再按 1.1 重新进 EDL。EDL 闲置一段时间或某条命令失败后，常常要重进一次。
 5. Linux：确认 ModemManager 已停（`systemctl status ModemManager`），udev 规则已装；还不行就用 `sudo`。
 6. Windows（未实测）：设备管理器里设备还带感叹号，就按 1.1 用 Zadig 装 WinUSB。装过高通官方 9008 驱动的，edl 也可以加 `--serial` 走串口方式（`edl --serial printgpt`）。
@@ -876,7 +961,9 @@ tar tf userdata.tar | head -20
 
 **已知问题：刷完后的系统目前不能用 USB 线登录。** 镜像里的 USB 网络已经设成 NCM（设备 `172.16.42.1`，上游设备包默认是 macOS 不支持的 RNDIS），但系统起来后设备的 USB 口不会被电脑识别（电脑的 USB 设备列表里看不到它），改回 RNDIS 也一样，问题在 USB 口没切到设备模式，还没修。
 
-所以刷完后只能连上 WiFi 再用 WiFi 的地址登录。bootstrap 阶段（[A5](#a5-ssh-登录-bootstrap)）的 USB 网络不受影响，照常能用。
+所以刷完后只能连上 WiFi 再用 WiFi 的地址登录。
+
+bootstrap 阶段（[A5](#a5-ssh-登录-bootstrap)）的 USB 网络**并不保证能用**。原先这里写的是「不受影响，照常能用」，实测不成立：有一台 CD-18781Y 在 bootstrap 下 `ls /sys/class/udc/` 是空目录，也就是内核根本没注册 USB 设备控制器，`usb0` 无从建立，电脑侧看不到任何设备 —— 和刷完后是同一个根因（USB 口没进设备模式）。判断和改走 WiFi 的做法见 [A5](#a5-ssh-登录-bootstrap)。
 
 ### 镜像里的系统调整
 
