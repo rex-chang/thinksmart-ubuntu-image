@@ -18,7 +18,14 @@ class Mpv:
         self._pending_lock = threading.Lock()
         self._rid = 0
         self._lock = threading.Lock()
+        self._restart_lock = threading.Lock()
+        self._path = path
+        self._volume = volume
+        self._proc = None
+        self._sock = None
+        self._spawn()
 
+    def _spawn(self):
         self._stop_existing()
         env = os.environ.copy()
         env.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
@@ -34,21 +41,44 @@ class Mpv:
         env["NO_PROXY"] = no_proxy
         self._proc = subprocess.Popen(
             [
-                path,
+                self._path,
                 "--idle=yes",
                 "--no-video",
                 "--audio-display=no",
                 "--really-quiet",
                 "--ao=pulse",
-                f"--volume={volume}",
-                f"--input-ipc-server={socket_path}",
+                f"--volume={self._volume}",
+                f"--input-ipc-server={self.socket_path}",
             ],
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        self._sock = self._connect()
-        threading.Thread(target=self._read_loop, daemon=True).start()
+        with self._lock:
+            self._sock = self._connect()
+        threading.Thread(target=self._read_loop, args=(self._sock,), daemon=True).start()
+
+    def _restart(self):
+        """Recover from a dead mpv/socket instead of raising BrokenPipe forever."""
+        with self._restart_lock:
+            with self._lock:
+                old, self._sock = self._sock, None
+            if old is not None:
+                try:
+                    old.close()
+                except OSError:
+                    pass
+            proc = self._proc
+            if proc is not None and proc.poll() is None:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=2)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+            self._spawn()
 
     def _stop_existing(self):
         try:
@@ -76,8 +106,16 @@ class Mpv:
         raise RuntimeError("mpv did not start")
 
     def command(self, *args):
+        payload = json.dumps({"command": list(args)}).encode() + b"\n"
+        try:
+            with self._lock:
+                self._sock.sendall(payload)
+            return
+        except (OSError, AttributeError):
+            pass
+        self._restart()
         with self._lock:
-            self._sock.sendall(json.dumps({"command": list(args)}).encode() + b"\n")
+            self._sock.sendall(payload)
 
     def command_wait(self, *args, timeout=1.0):
         with self._pending_lock:
@@ -85,10 +123,19 @@ class Mpv:
             rid = self._rid
             ev = threading.Event()
             self._pending[rid] = [ev, None]
-        with self._lock:
-            self._sock.sendall(
-                json.dumps({"command": list(args), "request_id": rid}).encode() + b"\n"
-            )
+        payload = json.dumps({"command": list(args), "request_id": rid}).encode() + b"\n"
+        try:
+            with self._lock:
+                self._sock.sendall(payload)
+        except (OSError, AttributeError):
+            try:
+                self._restart()
+                with self._lock:
+                    self._sock.sendall(payload)
+            except OSError:
+                with self._pending_lock:
+                    self._pending.pop(rid, None)
+                raise
         ev.wait(timeout)
         with self._pending_lock:
             slot = self._pending.pop(rid, None)
@@ -97,11 +144,11 @@ class Mpv:
     def get_property(self, name):
         return self.command_wait("get_property", name)
 
-    def _read_loop(self):
+    def _read_loop(self, sock):
         buf = b""
         while True:
             try:
-                chunk = self._sock.recv(65536)
+                chunk = sock.recv(65536)
             except OSError:
                 return
             if not chunk:
