@@ -23,6 +23,15 @@ class Mpv:
         env = os.environ.copy()
         env.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
         env.setdefault("PULSE_SERVER", "unix:/run/user/1000/pulse/native")
+        # NetEase CDN is reachable directly; ffmpeg does not reliably honour
+        # no_proxy, so drop the proxy variables for the mpv child entirely.
+        for k in ("http_proxy", "https_proxy", "all_proxy",
+                  "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+            env.pop(k, None)
+        no_proxy = ",".join(filter(None, [env.get("no_proxy"),
+                                          ".music.126.net", ".music.163.com"]))
+        env["no_proxy"] = no_proxy
+        env["NO_PROXY"] = no_proxy
         self._proc = subprocess.Popen(
             [
                 path,
