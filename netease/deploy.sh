@@ -14,8 +14,12 @@ scp -r "$ROOT/netease/hub/plugins_func/netease/." "$HOST:$SRV/plugins_func/netea
 scp "$ROOT/netease/hub/plugins_func/functions/play_netease.py" "$HOST:$SRV/plugins_func/functions/"
 scp "$ROOT/netease/hub/scripts/netease-login.py" \
     "$ROOT/netease/hub/scripts/netease-selftest.py" "$HOST:$SRV/scripts/"
-scp "$ROOT/netease/hub/patch/apply_abort_hook.py" "$HOST:$SRV/scripts/"
+scp "$ROOT/netease/hub/patch/apply_abort_hook.py" \
+    "$ROOT/netease/hub/patch/apply_music_handler.py" "$HOST:$SRV/scripts/"
+
+ssh "$HOST" "cd $SRV && python3 scripts/apply_music_handler.py ."
 
 ssh "$HOST" "sudo apt-get install -y --no-install-recommends mpv qrencode >/dev/null && mpv --version | head -1 && qrencode --version | head -1"
 
 echo "files copied. next: config.yaml allowlist + plugin block, abort hook, restart hub"
+echo "kiosk now-playing UI: ./netease/kiosk/deploy.sh"

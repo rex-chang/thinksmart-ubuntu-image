@@ -1,6 +1,7 @@
 import asyncio
 import difflib
 import json
+import time
 
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 
@@ -175,10 +176,28 @@ def _play_sync(conn, query, kind):
 
         p = player.get_player(_cfg(conn), _resolver)
         p.play_queue(queue)
-        who = "、".join(chosen.artists) or "未知歌手"
+        if not p.current:
+            conn.logger.bind(tag=TAG).warning(f"no stream for {chosen.name!r}")
+            return f"《{chosen.name}》暂时放不了（版权或网络），换一首？"
+        # loadfile is asynchronous: wait until mpv actually holds a file, otherwise a
+        # resolver/HTTP failure would still be reported as "正在播放".
+        deadline = time.time() + 2.5
+        started = False
+        while time.time() < deadline:
+            idle = p.mpv.get_property("idle-active")
+            if idle is False:
+                started = True
+                break
+            time.sleep(0.1)
+        if not started or not p.current:
+            conn.logger.bind(tag=TAG).warning(f"mpv did not start {chosen.name!r}")
+            p.stop()
+            return f"《{chosen.name}》暂时放不了（版权或网络），换一首？"
+        actual = p.current
+        who = "、".join(actual.artists) or "未知歌手"
         if kind in ("daily", "playlist"):
-            return f"开始播放{label}，共 {len(queue)} 首，第一首《{chosen.name}》- {who}"
-        return f"正在播放《{chosen.name}》- {who}"
+            return f"开始播放{label}，共 {len(queue)} 首，第一首《{actual.name}》- {who}"
+        return f"正在播放《{actual.name}》- {who}"
     except eapi.LoginRequired:
         return "还没有登录网易云，先运行 scripts/netease-login.py 扫码登录"
     except eapi.NeteaseError as e:
