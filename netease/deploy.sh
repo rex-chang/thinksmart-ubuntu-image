@@ -9,12 +9,12 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 ssh "$HOST" "cp -a /home/ubuntu/xiaozhi-hub-server /home/ubuntu/xiaozhi-hub-server.bak-\$(date +%F-%H%M)"
 
-rsync -av "$ROOT/netease/hub/plugins_func/netease/" "$HOST:$SRV/plugins_func/netease/"
-rsync -av "$ROOT/netease/hub/plugins_func/functions/play_netease.py" \
-    "$HOST:$SRV/plugins_func/functions/"
-rsync -av "$ROOT/netease/hub/scripts/netease-login.py" \
+ssh "$HOST" "mkdir -p $SRV/plugins_func/netease"
+scp -r "$ROOT/netease/hub/plugins_func/netease/." "$HOST:$SRV/plugins_func/netease/"
+scp "$ROOT/netease/hub/plugins_func/functions/play_netease.py" "$HOST:$SRV/plugins_func/functions/"
+scp "$ROOT/netease/hub/scripts/netease-login.py" \
     "$ROOT/netease/hub/scripts/netease-selftest.py" "$HOST:$SRV/scripts/"
-rsync -av "$ROOT/netease/hub/patch/apply_abort_hook.py" "$HOST:$SRV/scripts/"
+scp "$ROOT/netease/hub/patch/apply_abort_hook.py" "$HOST:$SRV/scripts/"
 
 ssh "$HOST" "sudo apt-get install -y --no-install-recommends mpv qrencode >/dev/null && mpv --version | head -1 && qrencode --version | head -1"
 
