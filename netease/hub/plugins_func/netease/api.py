@@ -19,6 +19,7 @@ class Track:
     duration_ms: int = 0
     fee: int = 0
     privilege: Privilege | None = None
+    cover: str = ""
 
 
 @dataclass
@@ -39,6 +40,7 @@ def _track(raw):
         raw.get("dt", 0),
         raw.get("fee", 0),
         Privilege(p.get("st", 0), p.get("pl", 0)) if p else None,
+        (raw.get("al") or {}).get("picUrl", ""),
     )
 
 

@@ -1,5 +1,6 @@
 import asyncio
 import difflib
+import json
 
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 
@@ -78,6 +79,34 @@ def _resolver(track_id, level):
 
 def _say(text):
     return ActionResponse(Action.RESPONSE, result=text, response=text)
+
+
+async def _publish(conn):
+    """Tell the kiosk what is playing so it can show the now-playing bar."""
+    ws = getattr(conn, "websocket", None) if conn is not None else None
+    if ws is None:
+        return
+    try:
+        p = player.get_player(_cfg(conn), _resolver)
+    except Exception:
+        return
+    cur = p.current
+    msg = {"type": "music",
+           "state": "stopped" if not cur else ("paused" if p.paused else "playing")}
+    if cur:
+        msg.update({
+            "id": cur.id, "title": cur.name, "artists": cur.artists,
+            "album": cur.album, "cover": getattr(cur, "cover", ""),
+            "duration": int((cur.duration_ms or 0) / 1000),
+            "paused": p.paused, "queue": len(p.queue), "index": p.index,
+        })
+    try:
+        await ws.send(json.dumps(msg, ensure_ascii=False))
+    except Exception as e:
+        try:
+            conn.logger.bind(tag=TAG).debug(f"music event failed: {e}")
+        except Exception:
+            pass
 
 
 def _score(track, q):
@@ -231,9 +260,13 @@ def _control_sync(conn, action, value):
 async def play_netease(conn, query: str = "", kind: str = "song"):
     if kind not in ("song", "artist", "daily", "playlist"):
         kind = "song"
-    return _say(await asyncio.to_thread(_play_sync, conn, query, kind))
+    text = await asyncio.to_thread(_play_sync, conn, query, kind)
+    await _publish(conn)
+    return _say(text)
 
 
 @register_function("control_netease", CTL_DESC, ToolType.SYSTEM_CTL)
 async def control_netease(conn, action: str, value: str = ""):
-    return _say(await asyncio.to_thread(_control_sync, conn, action, value))
+    text = await asyncio.to_thread(_control_sync, conn, action, value)
+    await _publish(conn)
+    return _say(text)
