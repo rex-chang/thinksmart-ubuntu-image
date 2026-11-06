@@ -15,11 +15,11 @@ HANDLER = '''from typing import Any, Dict
 
 from core.handle.textMessageHandler import TextMessageHandler
 from core.handle.textMessageType import TextMessageType
-from plugins_func.functions.play_netease import control_netease
+from plugins_func.functions.play_netease import music_command
 
 
 class MusicTextMessageHandler(TextMessageHandler):
-    """Direct playback controls from the kiosk now-playing bar: no model, no TTS."""
+    """Direct player commands from the kiosk: no model, no TTS."""
 
     @property
     def message_type(self) -> TextMessageType:
@@ -27,9 +27,11 @@ class MusicTextMessageHandler(TextMessageHandler):
 
     async def handle(self, conn, msg_json: Dict[str, Any]) -> None:
         action = (msg_json.get("action") or "").strip()
-        if action not in ("pause", "resume", "next", "prev", "stop"):
+        value = msg_json.get("value", "")
+        if action not in ("pause", "resume", "next", "prev", "stop", "seek",
+                          "status", "lyrics", "playlists", "play_playlist", "playlist_tracks", "play_playlist_track", "play_index", "queue"):
             return
-        await control_netease(conn, action, "")
+        await music_command(conn, action, value)
 '''
 
 

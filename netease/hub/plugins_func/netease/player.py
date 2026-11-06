@@ -202,6 +202,14 @@ class Player:
         self._failures = 0
         self._load()
 
+    def play_at(self, index):
+        if not self.queue:
+            return False
+        self.index = max(0, min(int(index), len(self.queue) - 1))
+        self._failures = 0
+        self._load()
+        return self.current is not None
+
     def _load(self):
         while self.queue and 0 <= self.index < len(self.queue):
             t = self.queue[self.index]

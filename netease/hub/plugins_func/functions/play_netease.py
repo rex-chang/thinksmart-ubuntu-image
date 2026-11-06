@@ -82,6 +82,25 @@ def _say(text):
     return ActionResponse(Action.RESPONSE, result=text, response=text)
 
 
+def _queue_view(p, limit=60):
+    return [{"id": t.id, "name": t.name, "artists": t.artists}
+            for t in (p.queue or [])[:limit]]
+
+
+async def _send(conn, payload):
+    """Send one extra music event (lyrics/playlists/...) to the kiosk."""
+    ws = getattr(conn, "websocket", None) if conn is not None else None
+    if ws is None:
+        return
+    try:
+        await ws.send(json.dumps({"type": "music", **payload}, ensure_ascii=False))
+    except Exception as e:
+        try:
+            conn.logger.bind(tag=TAG).debug(f"music event failed: {e}")
+        except Exception:
+            pass
+
+
 async def _publish(conn):
     """Tell the kiosk what is playing so it can show the now-playing bar."""
     ws = getattr(conn, "websocket", None) if conn is not None else None
@@ -100,6 +119,7 @@ async def _publish(conn):
             "album": cur.album, "cover": getattr(cur, "cover", ""),
             "duration": int((cur.duration_ms or 0) / 1000),
             "paused": p.paused, "queue": len(p.queue), "index": p.index,
+            "queue_items": _queue_view(p),
         })
     try:
         await ws.send(json.dumps(msg, ensure_ascii=False))
@@ -131,6 +151,11 @@ def _pick(tracks, query):
     return None
 
 
+def _same_artist(track, artist):
+    artist = (artist or "").strip().lower()
+    return bool(artist) and any(artist in a.lower() or a.lower() in artist for a in track.artists)
+
+
 def _match_playlist(playlists, name):
     best, score = None, 0.0
     for p in playlists:
@@ -160,7 +185,7 @@ def _play_sync(conn, query, kind):
         else:
             if not query:
                 return "想听什么歌？说个歌名或歌手。"
-            tracks = api.search_songs(client, query, 10)
+            tracks = api.search_songs(client, query, 30 if kind == "artist" else 10)
             label = ""
 
         if not tracks:
@@ -172,7 +197,12 @@ def _play_sync(conn, query, kind):
             chosen = _pick(tracks, query)
             if not chosen:
                 return f"《{query}》要会员或没有版权，换一首？"
-            queue = [chosen]
+            if kind == "artist":
+                related = [t for t in tracks
+                           if t.id != chosen.id and _same_artist(t, query) and api.playable(t)]
+                queue = [chosen] + related[:20]
+            else:
+                queue = [chosen]
 
         p = player.get_player(_cfg(conn), _resolver)
         p.play_queue(queue)
@@ -197,6 +227,8 @@ def _play_sync(conn, query, kind):
         who = "、".join(actual.artists) or "未知歌手"
         if kind in ("daily", "playlist"):
             return f"开始播放{label}，共 {len(queue)} 首，第一首《{actual.name}》- {who}"
+        if kind == "artist" and len(queue) > 1:
+            return f"开始播放{query}，共 {len(queue)} 首，第一首《{actual.name}》- {who}"
         return f"正在播放《{actual.name}》- {who}"
     except eapi.LoginRequired:
         return "还没有登录网易云，先运行 scripts/netease-login.py 扫码登录"
@@ -222,13 +254,21 @@ def _control_sync(conn, action, value):
             p.resume()
             return "继续播放"
         if action == "next":
+            if not p.current:
+                return "现在没有在放歌"
             if not p.queue:
                 return "队列是空的"
+            if p.repeat != "all" and p.index + 1 >= len(p.queue):
+                return "已经是最后一首了"
             p.next()
             return "下一首"
         if action == "prev":
+            if not p.current:
+                return "现在没有在放歌"
             if not p.queue:
                 return "队列是空的"
+            if p.index <= 0:
+                return "已经是第一首了"
             p.prev()
             return "上一首"
         if action == "stop":
@@ -273,6 +313,123 @@ def _control_sync(conn, action, value):
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"control_netease failed: {e}")
         return "操作失败了"
+
+
+async def music_command(conn, action, value=""):
+    """Direct commands from the kiosk player: no model turn, no TTS."""
+    action = (action or "").strip()
+    value = "" if value is None else str(value)
+    if action == "status":
+        await _publish(conn)
+        return ""
+    if action in ("pause", "resume", "next", "prev", "stop", "seek"):
+        text = await asyncio.to_thread(_control_sync, conn, action, value)
+        await _publish(conn)
+        return text
+    if action == "lyrics":
+        try:
+            song_id = int(value)
+            lrc, tlrc = await asyncio.to_thread(api.lyrics, _client(), song_id)
+            await _send(conn, {"subtype": "lyrics", "id": song_id,
+                               "lrc": lrc, "tlyric": tlrc})
+        except Exception as e:
+            try:
+                conn.logger.bind(tag=TAG).warning(f"lyrics failed: {e}")
+            except Exception:
+                pass
+            await _send(conn, {"subtype": "error", "message": "歌词加载失败"})
+        return ""
+    if action == "playlists":
+        try:
+            client = _client()
+            me = client.account()
+            if not me:
+                raise eapi.LoginRequired(301, "no profile")
+            items = await asyncio.to_thread(api.user_playlists, client, me["userId"])
+            await _send(conn, {"subtype": "playlists", "items": [
+                {"id": p.get("id"), "name": p.get("name", ""),
+                 "cover": p.get("coverImgUrl", ""), "count": p.get("trackCount", 0)}
+                for p in items
+            ]})
+        except eapi.LoginRequired:
+            await _send(conn, {"subtype": "error", "message": "还没有登录网易云"})
+        except Exception as e:
+            try:
+                conn.logger.bind(tag=TAG).warning(f"playlists failed: {e}")
+            except Exception:
+                pass
+            await _send(conn, {"subtype": "error", "message": "歌单加载失败"})
+        return ""
+    if action == "play_playlist":
+        try:
+            tracks = await asyncio.to_thread(api.playlist_tracks, _client(), int(value))
+            if not tracks:
+                raise ValueError("empty playlist")
+            p = player.get_player(_cfg(conn), _resolver)
+            p.play_queue(tracks)
+            await _publish(conn)
+        except Exception as e:
+            try:
+                conn.logger.bind(tag=TAG).warning(f"play playlist failed: {e}")
+            except Exception:
+                pass
+            await _send(conn, {"subtype": "error", "message": "歌单播放失败"})
+        return ""
+    if action == "playlist_tracks":
+        try:
+            tracks = await asyncio.to_thread(api.playlist_tracks, _client(), int(value))
+            await _send(conn, {"subtype": "playlist_tracks", "playlist": int(value), "items": [
+                {"id": t.id, "name": t.name, "artists": t.artists,
+                 "duration": int((t.duration_ms or 0) / 1000),
+                 "cover": getattr(t, "cover", "")} for t in tracks
+            ]})
+        except Exception as e:
+            try:
+                conn.logger.bind(tag=TAG).warning(f"playlist tracks failed: {e}")
+            except Exception:
+                pass
+            await _send(conn, {"subtype": "error", "message": "歌单加载失败"})
+        return ""
+    if action == "play_playlist_track":
+        try:
+            pid, idx = value.split(":", 1)
+            tracks = await asyncio.to_thread(api.playlist_tracks, _client(), int(pid))
+            if not tracks:
+                raise ValueError("empty playlist")
+            p = player.get_player(_cfg(conn), _resolver)
+            p.play_queue(tracks)
+            p.play_at(int(idx))
+            await _publish(conn)
+        except Exception as e:
+            try:
+                conn.logger.bind(tag=TAG).warning(f"play playlist track failed: {e}")
+            except Exception:
+                pass
+            await _send(conn, {"subtype": "error", "message": "歌单播放失败"})
+        return ""
+    if action == "play_index":
+        try:
+            p = player.get_player(_cfg(conn), _resolver)
+            if not p.queue:
+                return ""
+            p.play_at(int(value))
+            await _publish(conn)
+        except Exception as e:
+            try:
+                conn.logger.bind(tag=TAG).warning(f"play index failed: {e}")
+            except Exception:
+                pass
+            await _send(conn, {"subtype": "error", "message": "切歌失败"})
+        return ""
+    if action == "queue":
+        try:
+            p = player.get_player(_cfg(conn), _resolver)
+            await _send(conn, {"subtype": "queue", "items": _queue_view(p),
+                               "index": p.index})
+        except Exception:
+            pass
+        return ""
+    return ""
 
 
 @register_function("play_netease", PLAY_DESC, ToolType.SYSTEM_CTL)

@@ -59,6 +59,13 @@ def search_songs(client, q, limit=10):
     return [_track(s) for s in songs]
 
 
+def lyrics(client, song_id):
+    res = client.web_get("/api/song/lyric",
+                         {"id": song_id, "lv": -1, "kv": -1, "tv": -1})
+    return ((res.get("lrc") or {}).get("lyric") or "",
+            (res.get("tlyric") or {}).get("lyric") or "")
+
+
 def daily_songs(client):
     res = client.web_get("/api/v3/discovery/recommend/songs")
     return [_track(s) for s in ((res.get("data") or {}).get("dailySongs") or [])]

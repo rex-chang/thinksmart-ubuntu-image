@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""Print the ThinkSmart status from the client's /api/status endpoint."""
+import json
+import sys
+import urllib.request
+
+URL = 'http://127.0.0.1:8090/api/status'
+
+
+def duration(sec):
+    sec = max(0, int(Number(sec)))
+    return f'{sec // 60}:{sec % 60:02d}'
+
+
+def Number(value):
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def main():
+    try:
+        with urllib.request.urlopen(URL, timeout=5) as response:
+            d = json.load(response)
+    except Exception as e:
+        print(f'读取 {URL} 失败: {e}')
+        return 1
+
+    up = int(d.get('uptime_s') or 0)
+    up_text = f'{up // 86400}天{(up % 86400) // 3600}小时' if up >= 86400 else f'{up // 3600}小时{(up % 3600) // 60}分'
+    cpu = d.get('cpu') or {}
+    mem = d.get('memory') or {}
+    disk = d.get('disk') or {}
+    services = d.get('services') or {}
+    music = d.get('music') or {}
+    update = d.get('update') or {}
+    procs = d.get('processes') or []
+    load = '/'.join(f'{x:.1f}' for x in (cpu.get('load') or []))
+    print(f'ThinkSmart {d.get("version", "?")}  已运行 {up_text}')
+    print(f'CPU     {cpu.get("used_percent", "?")}% ({cpu.get("cores", "?")} 核)  负载 {load}')
+    print(f'内存    {mem.get("used_mb", "?")}/{mem.get("total_mb", "?")} MB  可用 {mem.get("available_mb", "?")} MB  swap {mem.get("swap_used_mb", "?")} MB')
+    print(f'磁盘    {disk.get("used_gb", "?")}/{disk.get("total_gb", "?")} GB  剩余 {disk.get("free_gb", "?")} GB')
+    print(f'温度    {d.get("temperature_c", "?")} °C')
+    print(f'服务    client={services.get("client")}  kiosk={services.get("kiosk")}  hub={services.get("hub")}')
+    if music and music.get('state') != 'stopped' and music.get('title'):
+        title = music.get('title')
+        artists = ' / '.join(music.get('artists') or [])
+        print(f'播放    {music.get("state")} 《{title}》- {artists}  '
+              f'{duration(music.get("position"))} / {duration(music.get("duration"))}'
+              f'  队列 {music.get("queue")} 首')
+    else:
+        print('播放    未播放')
+    if procs:
+        print('进程    ' + '  '.join(f'{p.get("name")} {p.get("rss_mb")}M' for p in procs))
+    if update:
+        print(f'更新    current={update.get("current")}  available={update.get("available")}'
+              + (f'  error={update.get("check_error")}' if update.get('check_error') else ''))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
