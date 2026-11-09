@@ -325,6 +325,8 @@ def make_app(client: Client):
     app.router.add_post('/api/music', music)
     app.router.add_post('/api/netease/login/refresh', netease_login_action)
     app.router.add_post('/api/netease/login/cancel', netease_login_action)
+    app.router.add_post('/api/sleep', sleep_setting)
+    app.router.add_post('/api/brightness', brightness)
     app.router.add_post('/api/screen-off', screen_off)
     app.router.add_post('/api/volume', volume)
     app.router.add_post('/api/alarm-volume', alarm_volume)

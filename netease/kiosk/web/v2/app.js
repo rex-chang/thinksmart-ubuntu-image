@@ -753,7 +753,7 @@ function demoStatus() {
     music: null, update: { current: '0.1.5', available: null },
   };
 }
-function renderStatus(d) {
+function renderDeviceStatus(d) {
   const cpu = d.cpu || {}, mem = d.memory || {}, disk = d.disk || {};
   const svc = d.services || {}, music = d.music || {}, upd = d.update || {};
   const cpuPct = cpu.used_percent == null ? null : Number(cpu.used_percent);
@@ -797,11 +797,11 @@ function renderStatus(d) {
 }
 let statusTimer = null;
 async function loadStatus() {
-  if (DEMO !== null) { renderStatus(demoStatus()); return; }
+  if (DEMO !== null) { renderDeviceStatus(demoStatus()); return; }
   try {
     const response = await fetch('/api/status', { cache: 'no-store' });
     if (!response.ok) throw new Error('HTTP ' + response.status);
-    renderStatus(await response.json());
+    renderDeviceStatus(await response.json());
   } catch (e) {
     $('statusUpdated').textContent = '读取失败：' + e.message;
     $('statusDot').className = 'status-dot bad';

@@ -76,3 +76,9 @@ POST bodies are JSON objects. `start` and `logout` require `{}`; `refresh` and `
 说“登录网易云”“帮我扫码登录网易云”或“网易云登录”时，Hub 会调用 `login_netease`，二维码会显示在当前对话里的登录卡片中，不会写入聊天历史。卡片会显示等待扫码、手机确认、成功、过期或取消状态，并提供刷新和取消按钮；手机网易云 App 扫码并确认才会完成授权。取消也可以直接说“取消网易云登录”。本流程不额外播报 TTS。
 
 The login card is ephemeral and separate from persisted chat messages. The existing player bar and Hub music handler are independent of this voice-login flow.
+
+## Conversation regression verification
+
+Client deployments must exercise an ordinary request through `/api/text`, observe an actual reply and the `thinking → speaking → idle/listening` transitions on `/events`, and exercise setting the current volume through `/api/volume`. `/api/health` alone does not verify conversation or volume controls. Preserve `Client.volume_lock`, the `/api/sleep` and `/api/brightness` routes, and the conversation container when integrating login UI. The 2026-11-09 recovery restored these accidentally removed elements without modifying Hub model configuration.
+
+The diagnostics panel renderer must use a distinct name (`renderDeviceStatus`), not shadow the conversation's `renderStatus`. The duplicate declaration caused startup to fail at `undefined.cpu` before `connectEvents()`, leaving models and conversation state visually empty even though the Hub configuration remained intact. Verify the real page consumes SSE and displays the configured model and an ordinary reply after deployment.

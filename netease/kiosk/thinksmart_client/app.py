@@ -243,6 +243,7 @@ class Client:
         self.hub_seen = 0.0           # monotonic: last answer from the hub's HTTP side (health check)
         self.keys = Keys(on_step=self.volume_step, on_mic=self._on_mic)
         self.volume = None            # the device volume 0-100 (keys, voice, the page), as last read or set
+        self.volume_lock = asyncio.Lock()   # one change of the speaker's volume at a time
         self.held_volume = None       # a ring or a tone preview has the speaker: the device volume to put back
         self.alarms = alarms.Alarms()
         self.clock_ok = False         # the system clock is synchronised: alarms are judged
