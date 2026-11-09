@@ -33,12 +33,13 @@ SCP=(scp "${SSH_OPTS[@]}")
 "${SSH[@]}" "$HOST" "cd $SRV && $PYTHON scripts/netease-selftest.py --login-api"
 "${SSH[@]}" "$HOST" "systemctl --user restart xiaozhi-hub.service && systemctl --user is-active --quiet xiaozhi-hub.service"
 
-# The client/kiosk snapshot carries the inline QR card and its local Hub proxy routes.
-"${SSH[@]}" "$HOST" "mkdir -p /tmp/thinksmart-kiosk-ui"
-"${SCP[@]}" -r "$ROOT/netease/kiosk/thinksmart_client" "$ROOT/netease/kiosk/web" "$HOST:/tmp/thinksmart-kiosk-ui/"
-"${SSH[@]}" "$HOST" "set -e; base=\$(readlink -f /opt/thinksmart/client/current); sudo cp /tmp/thinksmart-kiosk-ui/thinksmart_client/app.py \"\$base/thinksmart_client/app.py\"; sudo cp /tmp/thinksmart-kiosk-ui/thinksmart_client/web.py \"\$base/thinksmart_client/web.py\"; sudo cp /tmp/thinksmart-kiosk-ui/web/v2/app.js \"\$base/web/v2/app.js\"; sudo cp /tmp/thinksmart-kiosk-ui/web/v2/app.css \"\$base/web/v2/app.css\"; sudo cp /tmp/thinksmart-kiosk-ui/web/v2/index.html \"\$base/web/v2/index.html\"; sudo python3 -m py_compile \"\$base/thinksmart_client/app.py\" \"\$base/thinksmart_client/web.py\"; sudo systemctl restart thinksmart-client.service; sudo systemctl is-active --quiet thinksmart-client.service"
-
-echo "NetEase backend and inline login card deployed; QR login API is local-only."
+# This script changes only the Hub. The kiosk UI (QR login card, now-playing bar, Bluetooth
+# settings) is part of the complete client release: copying single files over the installed
+# /opt/thinksmart/client/current would leave the device running two mixed versions. Deploy a
+# complete client instead; it goes through the device updater's self-test and rollback.
+echo "NetEase Hub backend deployed; client code was not changed."
+echo "Complete client (UI + Bluetooth): CLIENT_DIR=../xiaozhi-thinksmart-client-integration ./netease/kiosk/deploy.sh"
+echo "CLIENT_DIR must be a committed checkout whose __version__ is newer than the device's client."
 echo "CLI login: ssh $HOST 'cd $SRV && python3 scripts/netease-login.py'"
 echo "Kiosk API: GET http://127.0.0.1:16688/kiosk/netease/login/status"
 echo "Voice trigger: 登录网易云；card stays in the current conversation."
