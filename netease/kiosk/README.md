@@ -43,3 +43,34 @@ The hub must also have the direct-control handler and the metadata publisher:
 - `netease/hub/plugins_func/functions/play_netease.py` (`music` events, playback
   start verification);
 - `netease/hub/plugins_func/netease/player.py` (mpv self-heal, direct CDN).
+
+## QR login backend
+
+The Hub package includes a local-only QR login backend. It does not change the kiosk UI in this phase.
+
+Deploy the Hub package, including the idempotent API patch:
+
+```bash
+./netease/deploy.sh
+```
+
+The SSH CLI remains available:
+
+```bash
+cd /home/ubuntu/xiaozhi-hub-server/main/xiaozhi-server
+python3 scripts/netease-login.py
+```
+
+The same login state is available to a future kiosk settings page through the Hub's loopback-only API (`server.http_port`, 16688 on this device):
+
+```text
+GET  /kiosk/netease/login/status
+POST /kiosk/netease/login/start
+POST /kiosk/netease/login/refresh
+POST /kiosk/netease/login/cancel
+POST /kiosk/netease/logout
+```
+
+POST bodies are JSON objects. `start` and `logout` require `{}`; `refresh` and `cancel` require `{"task_id":"..."}`. The response includes a short-lived QR URL and in-memory PNG data URL, but never includes `MUSIC_U`, CSRF, NMTID, cookies, or device IDs. Requests with forwarding headers or non-loopback addresses are rejected. `python3 scripts/netease-selftest.py --login-api` checks the backend import and safe session summary without contacting NetEase.
+
+The current phase intentionally has no kiosk login UI. The existing player bar and Hub music handler are independent of this login API.

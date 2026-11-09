@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
+import argparse
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from plugins_func.netease import api, eapi, player, session
+from plugins_func.netease import api, eapi, login, player, session
 
 
-def main():
+def login_api_selftest():
+    summary = session.public_summary()
+    print("login API: ready", "logged_in=" + str(summary["logged_in"]).lower())
+    return 0
+
+
+def playback_selftest():
     if not session.load():
         print("FAIL: 没有登录态，先运行 scripts/netease-login.py")
         return 1
@@ -48,6 +55,15 @@ def main():
         return 0
     finally:
         p.mpv.quit()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--login-api", action="store_true")
+    args = parser.parse_args()
+    if args.login_api:
+        return login_api_selftest()
+    return playback_selftest()
 
 
 if __name__ == "__main__":

@@ -48,6 +48,17 @@ def clear() -> None:
         pass
 
 
+def public_summary():
+    data = load() or {}
+    if not data.get("music_u"):
+        return {"logged_in": False, "uid": 0, "nickname": "", "saved_at": 0}
+    return {
+        "logged_in": True,
+        "uid": int(data.get("uid") or 0),
+        "nickname": str(data.get("nickname") or ""),
+        "saved_at": int(data.get("saved_at") or 0),
+    }
+
 def device_id() -> str:
     try:
         d = DEVICE_FILE.read_text(encoding="utf-8").strip()
