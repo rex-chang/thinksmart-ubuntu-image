@@ -13,6 +13,7 @@ const ui = {
   thread: { entry: null, messages: [] },
   ptt: false,
   music: null,
+  neteaseLogin: null,
   metaKey: '',
   barArtKey: '',
   pfArtKey: '',
@@ -978,6 +979,44 @@ function renderPending() {
   scrollDown();
 }
 
+
+function renderNeteaseLogin() {
+  const card = $('neteaseLoginCard');
+  const data = ui.neteaseLogin;
+  if (!data || !data.task) { card.hidden = true; card.textContent = ''; return; }
+  const task = data.task;
+  card.hidden = false;
+  card.textContent = '';
+  const title = document.createElement('h3');
+  title.textContent = '网易云扫码登录';
+  const image = document.createElement('img');
+  image.className = 'netease-login-qr';
+  image.alt = '网易云登录二维码';
+  if (typeof task.qr_data_url === 'string' && task.qr_data_url.startsWith('data:image/png;base64,')) image.src = task.qr_data_url;
+  const status = document.createElement('p');
+  const labels = { waiting_scan: '请用网易云 App 扫码', scanned: '已扫码，请在手机上确认', succeeded: '登录成功', expired: '二维码已过期', cancelled: '已取消登录', failed: '登录失败' };
+  status.textContent = labels[task.state] || '正在准备二维码';
+  const account = data.account || {};
+  if (task.state === 'succeeded' && account.nickname) status.textContent += `：${account.nickname}`;
+  card.append(title, image, status);
+  if (task.state === 'waiting_scan' || task.state === 'scanned') {
+    const actions = document.createElement('div');
+    actions.className = 'netease-login-actions';
+    const refresh = document.createElement('button');
+    refresh.textContent = '刷新二维码';
+    refresh.onclick = () => loginCardAction('refresh', task.id);
+    const cancel = document.createElement('button');
+    cancel.textContent = '取消';
+    cancel.onclick = () => loginCardAction('cancel', task.id);
+    actions.append(refresh, cancel);
+    card.append(actions);
+  }
+}
+
+async function loginCardAction(action, taskId) {
+  const r = await postJson(`/api/netease/login/${action}`, { action, task_id: taskId });
+  if (!r || r.ok === false) toast((r && r.error) || '登录操作失败', 'error');
+}
 /* ---- overlays ---- */
 let toastTimer = null;
 function toast(text, kind) {
@@ -1330,29 +1369,28 @@ function seekAt(clientX, commit) {
 /* ---- events from the client ---- */
 const handlers = {
   snapshot(s) {
-    if (ui.build && s.build && s.build !== ui.build) return location.reload();   // client restarted (deployed)
+    if (ui.build && s.build && s.build !== ui.build) return location.reload();
     ui.build = s.build;
     ui.status = s.status; ui.models = server.models = s.models; ui.thread = server.thread = s.thread;
     switching = null;
     for (const k in seenThreads) delete seenThreads[k];
     seenThreads[s.thread.entry] = s.thread.messages;
-    if (s.update) { ui.version = s.version; ui.update = s.update; }   // the demo's snapshots have none
+    if (s.update) { ui.version = s.version; ui.update = s.update; }
     if (s.alarms) ui.alarms = s.alarms;
     if (s.music !== undefined) { ui.music = s.music; renderMusic(); }
+    if (s.netease_login !== undefined) { ui.neteaseLogin = s.netease_login; renderNeteaseLogin(); }
     renderModels(); renderThread(); renderStatus(); renderAlarms();
     updateFinished((s.update || {}).job);
   },
-  power(p) {
-    $('powerOff').classList.toggle('on', p.state === 'off');
+  netease_login(data) {
+    ui.neteaseLogin = data;
+    renderNeteaseLogin();
+    if (data.task && data.task.state === 'succeeded') toast(`网易云已登录${data.account && data.account.nickname ? '：' + data.account.nickname : ''}`);
+    scrollDown();
   },
-  update(u) {
-    ui.update = u;
-    renderUpdate();
-    updateFinished(u.job);
-  },
-  state(s) {
-    ui.status = s; renderStatus(); markLive(); renderHead();
-  },
+  power(p) { $('powerOff').classList.toggle('on', p.state === 'off'); },
+  update(u) { ui.update = u; renderUpdate(); updateFinished(u.job); },
+  state(s) { ui.status = s; renderStatus(); markLive(); renderHead(); },
   model(m) {
     server.models = m;
     if (switching && (!m.current || m.current.entry !== switching)) return;
@@ -1360,7 +1398,7 @@ const handlers = {
   },
   thread(t) {
     server.thread = t;
-    if (t.reset) for (const k in seenThreads) delete seenThreads[k];   // cleared, or the hub's history loaded
+    if (t.reset) for (const k in seenThreads) delete seenThreads[k];
     seenThreads[t.entry] = t.messages;
     if (switching && t.entry !== switching) return;
     ui.thread = t; renderThread();
@@ -1368,13 +1406,10 @@ const handlers = {
   message: m => upsertMessage(m),
   toast: t => toast(t.text, t.kind),
   volume(v) {
-    // a ring's own volume (keys while it rings) is shown, but isn't the device volume
     if (!v.ring) { ui.status.volume = v.volume; renderVol(); }
     if (v.source !== 'page') showVolume(v.volume);
   },
-  alarms(a) {
-    ui.alarms = a; renderAlarms();
-  },
+  alarms(a) { ui.alarms = a; renderAlarms(); },
   music(m) {
     const old = ui.music && ui.music.id;
     ui.music = m;
@@ -1390,13 +1425,11 @@ const handlers = {
     const tr = new Map(parseLrc(m.tlyric).map(l => [Math.round(l.t * 10), l.text]));
     for (const l of lines) l.tr = tr.get(Math.round(l.t * 10)) || '';
     ui.lyrics = { id: m.id, lines };
-    lyricsReq = null;
-    lastLyricIndex = -1;
+    lyricsReq = null; lastLyricIndex = -1;
     if (ui.playerOpen) renderLyrics();
   },
   music_playlists(m) {
-    ui.playlists = m.items || [];
-    playlistsReq = false;
+    ui.playlists = m.items || []; playlistsReq = false;
     if (ui.drawerTab === 'playlists') renderDrawer();
   },
   music_playlist_tracks(m) {
@@ -1412,9 +1445,7 @@ const handlers = {
     if (ui.lyrics === null && ui.music) ui.lyrics = { id: ui.music.id, lines: [] };
     if (ui.drawerTab === 'playlists') renderDrawer();
   },
-  level(l) {
-    level.target = ui.status.state === 'speaking' ? Math.min(1, l.out * 6) : micLevel(l.mic);
-  },
+  level(l) { level.target = ui.status.state === 'speaking' ? Math.min(1, l.out * 6) : micLevel(l.mic); },
 };
 
 function connectEvents() {

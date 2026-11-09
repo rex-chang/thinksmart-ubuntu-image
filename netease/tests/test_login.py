@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -84,9 +85,9 @@ class TestLoginManager(unittest.TestCase):
         self.assertNotEqual(first["task"]["qr_url"], refreshed["task"]["qr_url"])
 
     def test_start_reuses_active_task_and_cancel_is_idempotent(self):
-        gate = []
-        manager = self.manager([{"code": 801}])
-        manager._sleep = lambda _seconds: gate.append(True)
+        gate = threading.Event()
+        manager = self.manager([{"code": 801}] * 20)
+        manager._sleep = lambda _seconds: gate.wait(1)
         first = manager.start()
         second = manager.start()
         self.assertEqual(first["task"]["id"], second["task"]["id"])

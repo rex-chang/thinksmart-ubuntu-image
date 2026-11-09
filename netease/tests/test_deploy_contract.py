@@ -16,6 +16,8 @@ class TestDeployContract(unittest.TestCase):
             "mpv",
             "netease-selftest.py --login-api",
             "systemctl --user restart xiaozhi-hub.service",
+            "thinksmart-kiosk-ui",
+            "inline login card",
         ):
             self.assertIn(command, script)
 
@@ -23,7 +25,7 @@ class TestDeployContract(unittest.TestCase):
         docs = (ROOT / "kiosk" / "README.md").read_text(encoding="utf-8")
         self.assertIn("local-only", docs)
         self.assertIn("/kiosk/netease/login/status", docs)
-        self.assertIn("no kiosk login UI", docs)
+        self.assertIn("login card", docs)
 
 
 if __name__ == "__main__":

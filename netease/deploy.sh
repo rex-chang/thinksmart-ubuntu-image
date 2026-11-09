@@ -33,7 +33,12 @@ SCP=(scp "${SSH_OPTS[@]}")
 "${SSH[@]}" "$HOST" "cd $SRV && $PYTHON scripts/netease-selftest.py --login-api"
 "${SSH[@]}" "$HOST" "systemctl --user restart xiaozhi-hub.service && systemctl --user is-active --quiet xiaozhi-hub.service"
 
-echo "NetEase backend deployed; QR login API is local-only."
+# The client/kiosk snapshot carries the inline QR card and its local Hub proxy routes.
+"${SSH[@]}" "$HOST" "mkdir -p /tmp/thinksmart-kiosk-ui"
+"${SCP[@]}" -r "$ROOT/netease/kiosk/thinksmart_client" "$ROOT/netease/kiosk/web" "$HOST:/tmp/thinksmart-kiosk-ui/"
+"${SSH[@]}" "$HOST" "set -e; base=\$(readlink -f /opt/thinksmart/client/current); sudo cp /tmp/thinksmart-kiosk-ui/thinksmart_client/app.py \"\$base/thinksmart_client/app.py\"; sudo cp /tmp/thinksmart-kiosk-ui/thinksmart_client/web.py \"\$base/thinksmart_client/web.py\"; sudo cp /tmp/thinksmart-kiosk-ui/web/v2/app.js \"\$base/web/v2/app.js\"; sudo cp /tmp/thinksmart-kiosk-ui/web/v2/app.css \"\$base/web/v2/app.css\"; sudo cp /tmp/thinksmart-kiosk-ui/web/v2/index.html \"\$base/web/v2/index.html\"; sudo python3 -m py_compile \"\$base/thinksmart_client/app.py\" \"\$base/thinksmart_client/web.py\"; sudo systemctl restart thinksmart-client.service; sudo systemctl is-active --quiet thinksmart-client.service"
+
+echo "NetEase backend and inline login card deployed; QR login API is local-only."
 echo "CLI login: ssh $HOST 'cd $SRV && python3 scripts/netease-login.py'"
 echo "Kiosk API: GET http://127.0.0.1:16688/kiosk/netease/login/status"
-echo "Kiosk UI integration remains a separate follow-up."
+echo "Voice trigger: 登录网易云；card stays in the current conversation."

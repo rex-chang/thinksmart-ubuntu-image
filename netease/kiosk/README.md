@@ -73,4 +73,6 @@ POST /kiosk/netease/logout
 
 POST bodies are JSON objects. `start` and `logout` require `{}`; `refresh` and `cancel` require `{"task_id":"..."}`. The response includes a short-lived QR URL and in-memory PNG data URL, but never includes `MUSIC_U`, CSRF, NMTID, cookies, or device IDs. Requests with forwarding headers or non-loopback addresses are rejected. `python3 scripts/netease-selftest.py --login-api` checks the backend import and safe session summary without contacting NetEase.
 
-The current phase intentionally has no kiosk login UI. The existing player bar and Hub music handler are independent of this login API.
+说“登录网易云”“帮我扫码登录网易云”或“网易云登录”时，Hub 会调用 `login_netease`，二维码会显示在当前对话里的登录卡片中，不会写入聊天历史。卡片会显示等待扫码、手机确认、成功、过期或取消状态，并提供刷新和取消按钮；手机网易云 App 扫码并确认才会完成授权。取消也可以直接说“取消网易云登录”。本流程不额外播报 TTS。
+
+The login card is ephemeral and separate from persisted chat messages. The existing player bar and Hub music handler are independent of this voice-login flow.

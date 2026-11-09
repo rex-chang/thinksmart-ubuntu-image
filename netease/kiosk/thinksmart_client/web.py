@@ -197,6 +197,13 @@ def make_app(client: Client):
         asyncio.create_task(client.music_action(body.get('action', ''), body.get('value', '')))
         return web.json_response({'ok': True})
 
+    async def netease_login_action(request):
+        body = await request.json()
+        action = body.get('action')
+        if action not in ('refresh', 'cancel') or set(body) != {'action', 'task_id'}:
+            return web.json_response({'ok': False, 'error': '请求无效'}, status=400)
+        result = await client.netease_login_action(action, body.get('task_id'))
+        return web.json_response(result, status=200 if result.get('ok') else 400)
     async def model(request):
         body = await request.json()
         return web.json_response(await client.set_model(body.get('kind'), body.get('vendor'), body.get('entry')))
@@ -316,8 +323,8 @@ def make_app(client: Client):
     app.router.add_post('/api/model', model)
     app.router.add_post('/api/text', text)
     app.router.add_post('/api/music', music)
-    app.router.add_post('/api/sleep', sleep_setting)
-    app.router.add_post('/api/brightness', brightness)
+    app.router.add_post('/api/netease/login/refresh', netease_login_action)
+    app.router.add_post('/api/netease/login/cancel', netease_login_action)
     app.router.add_post('/api/screen-off', screen_off)
     app.router.add_post('/api/volume', volume)
     app.router.add_post('/api/alarm-volume', alarm_volume)

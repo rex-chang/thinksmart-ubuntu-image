@@ -5,9 +5,29 @@ import time
 
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 
-from plugins_func.netease import api, eapi, player, session
+from plugins_func.netease import api, eapi, login, player, session
 
 TAG = __name__
+
+LOGIN_DESC = {
+    "type": "function",
+    "function": {
+        "name": "login_netease",
+        "description": "用户要登录网易云音乐、扫码登录网易云或重新登录网易云时调用；在设备屏幕当前对话里显示二维码。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+CANCEL_LOGIN_DESC = {
+    "type": "function",
+    "function": {
+        "name": "cancel_netease_login",
+        "description": "用户要取消网易云扫码登录时调用。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+_login_watchers = {}
 
 PLAY_DESC = {
     "type": "function",
@@ -81,6 +101,81 @@ def _resolver(track_id, level):
 def _say(text):
     return ActionResponse(Action.RESPONSE, result=text, response=text)
 
+
+def _login_public(result):
+    task = result.get("task") or {}
+    account = result.get("account") or {}
+    allowed_task = {
+        key: task[key]
+        for key in ("id", "state", "created_at", "expires_at", "qr_url", "qr_data_url", "error")
+        if key in task
+    }
+    allowed_account = {
+        key: account[key]
+        for key in ("logged_in", "uid", "nickname", "saved_at")
+        if key in account
+    }
+    return {"type": "netease_login", "task": allowed_task, "account": allowed_account}
+
+
+async def _send_login(conn, result):
+    ws = getattr(conn, "websocket", None) if conn is not None else None
+    if ws is None:
+        return
+    try:
+        await ws.send(json.dumps(_login_public(result), ensure_ascii=False))
+    except Exception as e:
+        try:
+            conn.logger.bind(tag=TAG).debug(f"login event failed: {e}")
+        except Exception:
+            pass
+
+
+async def _watch_login(conn, task_id):
+    key = id(conn)
+    try:
+        while True:
+            result = await asyncio.to_thread(login.manager().status)
+            await _send_login(conn, result)
+            state = (result.get("task") or {}).get("state")
+            if state in ("succeeded", "expired", "cancelled", "failed"):
+                return
+            await asyncio.sleep(2)
+    finally:
+        if _login_watchers.get(key) is asyncio.current_task():
+            _login_watchers.pop(key, None)
+
+
+def _restart_login_watcher(conn, task_id):
+    key = id(conn)
+    previous = _login_watchers.get(key)
+    if previous is not None:
+        previous.cancel()
+    _login_watchers[key] = asyncio.create_task(_watch_login(conn, task_id))
+
+
+@register_function("login_netease", LOGIN_DESC, ToolType.SYSTEM_CTL)
+async def login_netease(conn):
+    result = await asyncio.to_thread(login.manager().start)
+    await _send_login(conn, result)
+    task_id = (result.get("task") or {}).get("id")
+    if task_id:
+        _restart_login_watcher(conn, task_id)
+    return _say("请看屏幕上的二维码扫码登录网易云")
+
+
+@register_function("cancel_netease_login", CANCEL_LOGIN_DESC, ToolType.SYSTEM_CTL)
+async def cancel_netease_login(conn):
+    current = await asyncio.to_thread(login.manager().status)
+    task_id = (current.get("task") or {}).get("id")
+    if not task_id:
+        return _say("现在没有正在进行的网易云登录")
+    result = await asyncio.to_thread(login.manager().cancel, task_id)
+    await _send_login(conn, result)
+    watcher = _login_watchers.pop(id(conn), None)
+    if watcher is not None:
+        watcher.cancel()
+    return _say("已取消网易云登录")
 
 def _queue_view(p, limit=60):
     return [{"id": t.id, "name": t.name, "artists": t.artists}

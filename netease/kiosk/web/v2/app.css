@@ -385,6 +385,12 @@ body[data-state="listening"] .mic-ring { opacity: .75; }
 .power-off.on { display: flex; }
 .power-off b { font-size: 44px; font-weight: 700; color: #fff; }
 .power-off span { font-size: 24px; }
+.netease-login-card { margin: 18px 0; padding: 18px; border: 1px solid var(--line); border-radius: 20px; background: var(--card); text-align: center; }
+.netease-login-card h3 { margin: 0 0 10px; color: var(--ink2); }
+.netease-login-card p { margin: 10px 0; color: var(--ink3); }
+.netease-login-qr { display: block; width: 220px; height: 220px; margin: 0 auto; background: #fff; border-radius: 8px; }
+.netease-login-actions { display: flex; justify-content: center; gap: 10px; }
+.netease-login-actions button { padding: 8px 14px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink2); background: var(--card2); }
 .toast { position: fixed; z-index: 30; left: 50%; top: 104px; display: flex; align-items: center; gap: 12px; max-width: 760px;
          transform: translate(-50%, -16px); opacity: 0; pointer-events: none; padding: 16px 26px; border-radius: 20px; font-size: 20px;
          background: #182046; border: 1px solid #ffffff26; box-shadow: 0 14px 40px #0009; transition: transform .25s, opacity .25s; }

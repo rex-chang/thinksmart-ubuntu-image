@@ -239,10 +239,10 @@ class Client:
         self.screen.idle = self._screen_off_seconds()   # written by start()'s release()
         self.reports = 0              # pending on the hub
         self.music = None             # what the hub says NetEase is playing (for the page)
+        self.netease_login = None     # ephemeral QR-login card state; never part of chat history
         self.hub_seen = 0.0           # monotonic: last answer from the hub's HTTP side (health check)
         self.keys = Keys(on_step=self.volume_step, on_mic=self._on_mic)
         self.volume = None            # the device volume 0-100 (keys, voice, the page), as last read or set
-        self.volume_lock = asyncio.Lock()   # one change of the speaker's volume at a time
         self.held_volume = None       # a ring or a tone preview has the speaker: the device volume to put back
         self.alarms = alarms.Alarms()
         self.clock_ok = False         # the system clock is synchronised: alarms are judged
@@ -363,7 +363,7 @@ class Client:
 
     def snapshot(self):
         return {'status': self.status(), 'models': self.models, 'alarms': self.alarm_view(),
-                'music': self.music,
+                'music': self.music, 'netease_login': self.netease_login,
                 'thread': {'entry': self.view_entry(), 'messages': self.threads.get(self.view_entry(), [])}}
 
     def view_entry(self):
@@ -547,6 +547,22 @@ class Client:
             return
         await self.hub.send({'type': 'music', 'action': action, 'value': value})
 
+    async def netease_login_action(self, action, task_id):
+        if action not in ('refresh', 'cancel'):
+            return {'ok': False, 'error': '不支持的登录操作'}
+        task_id = str(task_id or '')
+        if not task_id or len(task_id) > 128 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_' for c in task_id):
+            return {'ok': False, 'error': '登录任务无效'}
+        path = f'/kiosk/netease/login/{action}'
+        try:
+            result = await self._hub_http(path, {'task_id': task_id})
+        except Exception:
+            return {'ok': False, 'error': '网关没有响应'}
+        if result.get('ok') and result.get('task'):
+            self.netease_login = {'task': result['task'], 'account': result.get('account') or {}}
+            self.events.publish('netease_login', self.netease_login)
+        return result
+
     async def ptt_start(self):
         if self.mic_off_toast():
             return
@@ -724,6 +740,12 @@ class Client:
             else:
                 self.music = {k: v for k, v in msg.items() if k != 'type'}
                 self.events.publish('music', self.music)
+        elif kind == 'netease_login':
+            self.netease_login = {
+                'task': dict(msg.get('task') or {}),
+                'account': dict(msg.get('account') or {}),
+            }
+            self.events.publish('netease_login', self.netease_login)
         elif kind == 'mcp':
             payload = msg.get('payload') or {}
             reply = await mcp.handle(payload, client=self)
