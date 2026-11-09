@@ -1,5 +1,6 @@
 #!/usr/bin/python3
-"""thinksmart-update: checks for and installs releases of the voice client (runs as root).
+"""thinksmart-update: checks for and installs releases of the voice client and of the system layer
+(runs as root).
 
   thinksmart-update check            fetch the release manifest, note a newer version
   thinksmart-update run              handle the requests the page dropped in requests/ (check, install)
@@ -7,6 +8,11 @@
   thinksmart-update boot             finish or undo an install a power cut interrupted (check, run
                                      and install do this first too: an install killed mid-way)
   thinksmart-update adopt DIR [VER]  take an existing client checkout as the installed version
+  thinksmart-update system-apply DIR install the system layer from a checkout of thinksmart-ubuntu-image
+                                     (image/device-setup.sh files): no backup, no restarts
+  thinksmart-update system-verify    print the system layer version and its file-set id; exit 1 if
+                                     an installed file differs from what was installed (build-image.sh)
+  thinksmart-update selftest         exit 0 if this script loads and reads its configuration
 
 Nothing is installed without a user's tap: the timer only checks. The page (client, user ubuntu)
 and the welcome page (kiosk, ubuntu) only read status.json and drop a request file; this script
@@ -24,12 +30,25 @@ conf, Wi-Fi) lives elsewhere and is never touched.
 Release layout under each source URL (GitHub Releases or a test server, same paths):
   latest/download/latest.json                                    manifest
   download/client-v1.2.3/thinksmart-client-1.2.3.tar.gz          paths named in the manifest
+
+System layer (2026-11-07): the same release may carry a "system" entry, a package of this
+repository's own files (shell, welcome page, keyboard, screen and mic services, audio and Bluetooth
+configuration, this updater). image/system-files.txt in the package says where each file goes and
+what to restart when it changed; files not in that table (kernel, boot partition, apt packages, the
+user's configuration) are never touched. Before installing, every file the table names is copied to
+/opt/thinksmart/system/backup/; if the restarted services don't come back, or power is cut on the
+way, the backup is put back. Versions: /opt/thinksmart/system/installed.json, none = 0.1.0 (the
+20261101 image). The client fields of status.json stay at the top level, the system ones are under
+"system"; the page asks for both with one request and the system layer goes first.
 """
 import datetime
 import fcntl
+import grp
 import hashlib
+import http.client
 import json
 import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -65,6 +84,24 @@ ENV_ID_RE = re.compile(r'[0-9a-f]{16}')                    # a directory name un
 
 ACTIVE_JOBS = ('preparing', 'downloading', 'installing', 'testing', 'rolling_back')
 
+UPDATER_VERSION = 2        # 1: client only (the 20261101 image); 2: also the system layer.
+                           # The client's deploy/bootstrap-updater compares this.
+ROOT = Path('/')           # where table destinations are (tests point it elsewhere)
+SYSTEM = OPT / 'system'
+SYS_RECORD = SYSTEM / 'installed.json'
+SYS_BACKUP = SYSTEM / 'backup'
+SYS_PENDING = STATE / 'system-pending.json'
+SYS_BASELINE = '0.1.0'     # devices without a record: the 20261101 image
+TABLE = 'image/system-files.txt'
+POST = 'image/system-post.sh'
+DEST_PREFIXES = ('/usr/local/', '/etc/', '/home/ubuntu/.config/')
+OWNERS = ('root', 'ubuntu')
+USER = 'ubuntu'
+SIMPLE_ACTIONS = {'none', 'keep', 'reload', 'kiosk', 'mic', 'wireplumber', 'pipewire', 'bluetooth',
+                  'boot', 'updater'}
+UNIT_RE = re.compile(r'[A-Za-z0-9@_.-]+\.(service|timer|path|socket)')
+PKG_RE = re.compile(r'[a-z0-9][a-z0-9.+-]*')
+
 
 class Fail(Exception):
     """An error to show on the page as it is (Chinese, for the user)."""
@@ -96,6 +133,20 @@ def load_status():
         return {}
 
 
+def write_durable(path, text):
+    """Write a file that power-cut recovery reads, and have it (and everything written before it)
+    on disk before going on. ext4 writes a new file's data up to ~30 s late but the rename of it
+    much sooner: without this a power cut can leave a pending record or a backup that exists but
+    is empty, and recovery would then skip the rollback or restore empty files."""
+    tmp = path.with_name(f'.{path.name}.tmp')
+    with open(tmp, 'w') as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    os.sync()
+
+
 def save_status(st):
     STATE.mkdir(parents=True, exist_ok=True)
     tmp = STATUS.with_suffix('.tmp')
@@ -104,11 +155,11 @@ def save_status(st):
     tmp.replace(STATUS)
 
 
-def set_job(st, state, version, message='', progress=None):
+def set_job(st, state, version, message='', progress=None, component='client'):
     st['job'] = {'state': state, 'version': version, 'message': message, 'progress': progress,
-                 'time': int(time.time())}
+                 'time': int(time.time()), 'component': component}
     save_status(st)
-    log(f'[{state}] {version} {message}')
+    log(f'[{component} {state}] {version} {message}')
 
 
 def version_key(v):
@@ -176,7 +227,7 @@ def fetch_manifest(conf, st):
             continue
         try:
             m = json.loads(fetch(conf, src + 'latest/download/latest.json', 64 << 10))
-        except (OSError, urllib.error.URLError, Fail, ValueError) as e:
+        except (OSError, urllib.error.URLError, http.client.HTTPException, Fail, ValueError) as e:
             errors.append(f'{src}: {e}')
             continue
         if not valid_manifest(m):
@@ -255,8 +306,10 @@ def download(conf, m, item, st, version, done_before, total):
                     f.write(chunk)
                     if time.monotonic() - shown > 1:
                         shown = time.monotonic()
-                        set_job(st, 'downloading', version, '正在下载', (done_before + got) / total)
-        except (OSError, urllib.error.URLError) as e:
+                        set_job(st, 'downloading', version, '正在下载', (done_before + got) / total,
+                                (st.get('job') or {}).get('component', 'client'))
+        # a connection cut half way raises http.client.IncompleteRead, not an OSError
+        except (OSError, urllib.error.URLError, http.client.HTTPException) as e:
             last_error = e
             log(f'download {src}: {e}')
             continue
@@ -267,7 +320,8 @@ def download(conf, m, item, st, version, done_before, total):
             dest.unlink(missing_ok=True)
             raise Fail('下载的文件校验不对（可能被改过或没下完整），没有安装')
         return dest
-    raise Fail(f'下载失败：{last_error}')
+    log('download failed everywhere:', repr(last_error))
+    raise Fail('下载失败：网络断了或者更新服务器没有响应，请稍后再试')
 
 
 # ---- install ----
@@ -412,7 +466,9 @@ def install(conf, version):
         return 1
 
     pending = {'from': cur, 'to': version, 'previous': previous_version(), 'need_hub': need_hub}
-    PENDING.write_text(json.dumps(pending))
+    # durable, and with it the unpacked version: else a power cut right after the switch can leave
+    # current pointing at empty files and no record that it still needs its self-test
+    write_durable(PENDING, json.dumps(pending))
     set_link('previous', cur)
     set_link('current', version)
     set_job(st, 'testing', version, '正在重启并自检')
@@ -453,6 +509,524 @@ def finish(conf, st, pending, seconds):
     return 1
 
 
+# ---- system layer ----
+
+def target(dest):
+    return ROOT / dest.lstrip('/')
+
+
+def file_sha(path):
+    try:
+        h = hashlib.sha256()
+        with open(path, 'rb') as f:
+            for chunk in iter(lambda: f.read(1 << 20), b''):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
+def valid_action(a):
+    if a in SIMPLE_ACTIONS:
+        return True
+    kind, _, unit = a.partition(':')
+    return kind in ('system', 'user') and bool(UNIT_RE.fullmatch(unit))
+
+
+def read_table(tree):
+    """[(src, dest, mode, owner, actions)], [required packages] from image/system-files.txt.
+    Lines: SRC DEST MODE OWNER ACTIONS (comma separated); SRC '-' = a file the post script edits
+    (backed up, compared, never installed); 'require PACKAGE' = a package the layer needs."""
+    entries, requires, seen = [], [], set()
+    try:
+        text = (tree / TABLE).read_text()
+    except OSError:
+        raise Fail('系统层更新包里没有文件表')
+    for line in text.splitlines():
+        line = line.split('#', 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        if parts[0] == 'require' and len(parts) == 2 and PKG_RE.fullmatch(parts[1]):
+            requires.append(parts[1])
+            continue
+        if len(parts) != 5:
+            raise Fail(f'系统层文件表有一行看不懂：{line}')
+        src, dest, mode, owner, acts = parts
+        actions = acts.split(',')
+        ok = (dest.startswith(DEST_PREFIXES) and os.path.normpath(dest) == dest and '..' not in dest
+              and dest not in seen and owner in OWNERS and all(valid_action(a) for a in actions)
+              and (src == '-' or (re.fullmatch(r'[0-7]{3,4}', mode) and '..' not in src
+                                  and not src.startswith('/') and (tree / src).is_file()
+                                  and not (tree / src).is_symlink())))
+        if not ok:
+            raise Fail(f'系统层文件表有一行不对：{line}')
+        seen.add(dest)
+        entries.append((src, dest, mode, owner, actions))
+    if not entries:
+        raise Fail('系统层文件表是空的')
+    return entries, requires
+
+
+def installed_files(tree, entries):
+    """{dest: sha256} of what this layer installs (its own files: not the kept user configs)."""
+    return {dest: file_sha(tree / src) for src, dest, _m, _o, acts in entries
+            if src != '-' and 'keep' not in acts}
+
+
+def tree_id(tree, entries):
+    """One id for the whole file set (the manifest and build-image.sh compare it)."""
+    lines = sorted(f'{dest} {mode} {owner} {file_sha(tree / src)}'
+                   for src, dest, mode, owner, acts in entries if src != '-' and 'keep' not in acts)
+    return hashlib.sha256('\n'.join(lines).encode()).hexdigest()
+
+
+def system_record():
+    try:
+        return json.loads(SYS_RECORD.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def system_version():
+    return system_record().get('version') or SYS_BASELINE
+
+
+def valid_system(s):
+    try:
+        f = s['file']
+        return bool(VERSION_RE.fullmatch(s['version']) and isinstance(s.get('notes', []), list)
+                    and re.fullmatch(r'[0-9a-f]{64}', s['tree'])
+                    and all(isinstance(p, str) and PKG_RE.fullmatch(p) for p in s.get('requires', []))
+                    and isinstance(f['path'], str) and '..' not in f['path']
+                    and not f['path'].startswith('/') and isinstance(f['size'], int) and f['size'] > 0
+                    and re.fullmatch(r'[0-9a-f]{64}', f['sha256']))
+    except (KeyError, TypeError):
+        return False
+
+
+def pkg_installed(name):
+    r = subprocess.run(['dpkg-query', '-W', '-f=${Status}', name], capture_output=True, text=True)
+    return r.returncode == 0 and r.stdout.endswith(' installed')
+
+
+def note_system(st, m):
+    sysst = st.setdefault('system', {})
+    sysst['current'] = system_version()
+    s = m.get('system')
+    if s is not None and not valid_system(s):
+        log('manifest: ignoring a malformed system entry')
+        s = None
+    if s and version_key(s['version']) > version_key(sysst['current']):
+        sysst['available'] = {'version': s['version'], 'notes': s.get('notes', []),
+                              'size': s['file']['size'],
+                              'missing': [p for p in s.get('requires', []) if not pkg_installed(p)]}
+    else:
+        sysst['available'] = None
+
+
+def own(path, owner):
+    os.chown(path, pwd.getpwnam(owner).pw_uid, grp.getgrnam(owner).gr_gid)
+
+
+def make_parents(path, owner):
+    missing = []
+    d = path.parent
+    while not d.exists():
+        missing.append(d)
+        d = d.parent
+    for d in reversed(missing):
+        d.mkdir()
+        os.chmod(d, 0o755)
+        own(d, owner)
+
+
+def put_file(data_from, path, mode, owner):
+    """Write a file atomically (a power cut leaves the old or the new one)."""
+    make_parents(path, owner)
+    tmp = path.with_name(f'.{path.name}.tsupd')
+    shutil.copyfile(data_from, tmp)
+    os.chmod(tmp, mode)
+    own(tmp, owner)
+    os.replace(tmp, path)
+
+
+def run_cmd(*cmd, timeout=120):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log('run', cmd, e)
+        return 1, ''
+    if r.returncode:
+        log('run', cmd, '->', r.returncode, r.stderr.strip()[-300:])
+    return r.returncode, r.stdout
+
+
+def as_user(*cmd, timeout=120):
+    uid = pwd.getpwnam(USER).pw_uid
+    return run_cmd('runuser', '-u', USER, '--', 'env', f'XDG_RUNTIME_DIR=/run/user/{uid}', *cmd,
+                   timeout=timeout)
+
+
+def unit_of(dest):
+    """('system'|'user', unit name) for a unit file the table installs, else None."""
+    name = dest.rsplit('/', 1)[-1]
+    if not UNIT_RE.fullmatch(name):
+        return None
+    if dest.startswith('/etc/systemd/system/'):
+        return 'system', name
+    if dest.startswith('/home/ubuntu/.config/systemd/user/'):
+        return 'user', name
+    return None
+
+
+def make_backup(dests):
+    """Copy every destination as it is now into SYS_BACKUP (absent ones recorded as such)."""
+    new = SYSTEM / 'backup.new'
+    shutil.rmtree(new, ignore_errors=True)
+    (new / 'files').mkdir(parents=True)
+    index = []
+    for i, dest in enumerate(sorted(dests)):
+        path = target(dest)
+        item = {'dest': dest, 'present': path.is_file() and not path.is_symlink()}
+        if item['present']:
+            stt = path.stat()
+            item.update(mode=stt.st_mode & 0o7777, uid=stt.st_uid, gid=stt.st_gid, sha256=file_sha(path))
+            shutil.copyfile(path, new / 'files' / str(i))
+        index.append(item)
+    (new / 'index.json').write_text(json.dumps(index, indent=1))
+    os.sync()       # the copies on disk before they replace the previous backup
+    shutil.rmtree(SYS_BACKUP, ignore_errors=True)
+    os.replace(new, SYS_BACKUP)
+    os.sync()
+    return {item['dest']: item for item in index}
+
+
+def apply_files(tree, entries, old_record, backup):
+    """Install the table's files; returns the actions of the files that changed (sorted), and the
+    destinations the old version had and this one dropped (removed)."""
+    actions = set()
+    for src, dest, mode, owner, acts in entries:
+        path = target(dest)
+        if src == '-':
+            continue
+        if 'keep' in acts and path.exists():
+            continue
+        if file_sha(path) == file_sha(tree / src):
+            continue
+        put_file(tree / src, path, int(mode, 8), owner)
+        actions.update(a for a in acts if a != 'keep')
+        if unit_of(dest):
+            actions.add('reload')
+    dropped = set(old_record.get('files', {})) - {e[1] for e in entries}
+    for dest in dropped:
+        path = target(dest)
+        if path.is_file():
+            unit = unit_of(dest)
+            if unit:
+                disable_unit(*unit)
+                actions.add('reload')
+            path.unlink()
+    if (tree / POST).is_file():
+        rc, _ = run_cmd('sh', str(tree / POST), str(tree), timeout=300)
+        if rc:
+            raise Fail('系统层收尾脚本出错')
+    for src, dest, _m, _o, acts in entries:
+        if src == '-' and file_sha(target(dest)) != (backup.get(dest) or {}).get('sha256'):
+            actions.update(a for a in acts if a != 'keep')
+    actions.discard('none')
+    return sorted(actions)
+
+
+def disable_unit(kind, unit):
+    if kind == 'system':
+        run_cmd('systemctl', 'disable', '--now', unit)
+    else:
+        as_user('systemctl', '--user', 'disable', '--now', unit)
+
+
+def wp_volume():
+    rc, out = as_user('wpctl', 'get-volume', '@DEFAULT_AUDIO_SINK@', timeout=10)
+    m = re.search(r'Volume: ([0-9.]+)', out) if rc == 0 else None
+    return m.group(1) if m else None
+
+
+def take_effect(actions):
+    """Make the changed files count: restart what reads them. Order: unit files, audio, services,
+    the screen last (it reloads the page the user is looking at)."""
+    if 'reload' in actions:
+        run_cmd('systemctl', 'daemon-reload')
+        as_user('systemctl', '--user', 'daemon-reload')
+    audio = 'pipewire' in actions or 'wireplumber' in actions
+    if audio:
+        # README 3.4: with thinksmart-mic holding the capture PCM, WirePlumber finds no sound card
+        vol = wp_volume()
+        as_user('systemctl', '--user', 'stop', 'thinksmart-mic.service')
+        if 'pipewire' in actions:
+            as_user('systemctl', '--user', 'restart', 'pipewire.service', 'pipewire-pulse.service',
+                    'wireplumber.service')
+        else:
+            as_user('systemctl', '--user', 'restart', 'wireplumber.service')
+        time.sleep(5)
+        as_user('systemctl', '--user', 'start', 'thinksmart-mic.service')
+        if vol:     # WirePlumber puts back the volume it saved, not the one the user set
+            for _ in range(10):
+                if as_user('wpctl', 'set-volume', '@DEFAULT_AUDIO_SINK@', vol, timeout=10)[0] == 0:
+                    break
+                time.sleep(1)
+    elif 'mic' in actions:
+        as_user('systemctl', '--user', 'restart', 'thinksmart-mic.service')
+    if audio or 'mic' in actions:
+        run_cmd('systemctl', 'restart', UNIT)    # rather than waiting for it to notice
+    for a in actions:
+        kind, _, unit = a.partition(':')
+        if kind == 'system':
+            run_cmd('systemctl', 'restart', unit)
+        elif kind == 'user':
+            as_user('systemctl', '--user', 'restart', unit)
+    if 'bluetooth' in actions:
+        run_cmd('systemctl', 'restart', 'bluetooth.service')
+    if 'kiosk' in actions:
+        run_cmd('systemctl', 'restart', 'thinksmart-kiosk.service')
+
+
+def unit_state(kind, unit):
+    """(active?, restart count) of a unit."""
+    show = ('systemctl', 'show', '-p', 'ActiveState', '-p', 'NRestarts', unit)
+    rc, out = run_cmd(*show) if kind == 'system' else as_user(show[0], '--user', *show[1:])
+    vals = dict(line.split('=', 1) for line in out.splitlines() if '=' in line)
+    return vals.get('ActiveState') == 'active', vals.get('NRestarts')
+
+
+def kiosk_pid():
+    """The kiosk browser (thinksmart-kiosk-app runs it again 2 s after it exits). Anchored on the
+    whole command: a shell or editor whose command line merely mentions the path must not count."""
+    rc, out = run_cmd('pgrep', '-f', '-o', r'^/usr/bin/python3 /usr/local/bin/thinksmart-kiosk\.py$')
+    return out.strip() or None
+
+
+def system_checks(actions, need_hub, need_audio=True):
+    """{check name: value or None}; None = not passing. Equal values twice, 10 s apart = stable."""
+    out = {}
+    for a in actions:
+        kind, _, unit = a.partition(':')
+        if kind in ('system', 'user'):
+            active, n = unit_state(kind, unit)
+            out[a] = n if active else None
+    if 'bluetooth' in actions:
+        active, n = unit_state('system', 'bluetooth.service')
+        out['bluetooth'] = n if active else None
+    if 'kiosk' in actions:
+        active, _ = unit_state('system', 'thinksmart-kiosk.service')
+        out['kiosk'] = kiosk_pid() if active else None
+    # sound only counts if it worked before the update (like the hub): a client that had crashed, the
+    # page on the welcome screen, would otherwise fail every update that touches audio, and with it
+    # the client update that would fix it
+    if need_audio and {'pipewire', 'wireplumber', 'mic'} & set(actions):
+        h = health()
+        out['audio'] = bool(h and h.get('audio') and (h.get('hub') or not need_hub)) or None
+    if 'updater' in actions:
+        rc, _ = run_cmd(str(target('/usr/local/sbin/thinksmart-update')), 'selftest', timeout=30)
+        out['updater'] = (rc == 0) or None
+    return out
+
+
+SYS_CHECK_WHY = {'kiosk': '屏幕界面没有启动起来', 'audio': '麦克风或扬声器没有恢复',
+                 'updater': '新的更新服务启动不了', 'bluetooth': '蓝牙服务没有启动起来'}
+
+
+def system_self_test(actions, need_hub, seconds, need_audio=True):
+    end = time.monotonic() + seconds
+    first = {}
+    while time.monotonic() < end:
+        time.sleep(3)
+        first = system_checks(actions, need_hub, need_audio)
+        if all(v is not None for v in first.values()):
+            time.sleep(10)      # still up, not restarted in between?
+            again = system_checks(actions, need_hub, need_audio)
+            if again == first:
+                return True, ''
+    bad = [k for k, v in first.items() if v is None] or list(first)
+    k = bad[0] if bad else ''
+    return False, SYS_CHECK_WHY.get(k, f'{k.partition(":")[2] or k} 没有正常运行')
+
+
+def write_record(version, tree, entries):
+    SYSTEM.mkdir(parents=True, exist_ok=True)
+    # durable before the pending record goes: an empty record would read as the 20261101 image
+    write_durable(SYS_RECORD, json.dumps({'version': version, 'tree': tree_id(tree, entries),
+                                          'files': installed_files(tree, entries)}, indent=1))
+
+
+def system_restore():
+    """Put every backed-up file back as it was; returns the actions to re-run."""
+    try:
+        index = json.loads((SYS_BACKUP / 'index.json').read_text())
+    except (OSError, ValueError):
+        log('rollback: no backup')
+        return []
+    actions = {'reload'}
+    for i, item in enumerate(index):
+        path = target(item['dest'])
+        if item['present']:
+            if file_sha(path) != item['sha256']:
+                saved = SYS_BACKUP / 'files' / str(i)
+                if file_sha(saved) != item['sha256']:
+                    # a damaged copy would replace the file with garbage or nothing: leave it be
+                    log('rollback: backup of', item['dest'], 'is damaged, not restored')
+                    continue
+                make_parents(path, 'root')
+                tmp = path.with_name(f'.{path.name}.tsupd')
+                shutil.copyfile(saved, tmp)
+                os.chmod(tmp, item['mode'])
+                os.chown(tmp, item['uid'], item['gid'])
+                os.replace(tmp, path)
+        elif path.is_file():
+            unit = unit_of(item['dest'])
+            if unit:
+                disable_unit(*unit)
+            path.unlink()
+    os.sync()       # restored files on disk before the pending record is dropped
+    return sorted(actions)
+
+
+def system_rollback(st, pending, why, seconds):
+    version, old = pending['to'], pending['from']
+    set_job(st, 'rolling_back', version, why + f'，正在退回 {old}', component='system')
+    system_restore()
+    actions = sorted(set(pending.get('actions') or []) | {'reload'})
+    take_effect(actions)
+    SYS_PENDING.unlink(missing_ok=True)
+    sysst = st.setdefault('system', {})
+    sysst['current'] = system_version()
+    sysst['failed'] = version
+    ok, _ = system_self_test([a for a in actions if a != 'updater'], False, seconds,
+                             pending.get('need_audio', True))
+    shutil.rmtree(SYSTEM / 'new', ignore_errors=True)
+    shutil.rmtree(DOWNLOAD, ignore_errors=True)
+    msg = f'系统层 {version} {why}，已退回 {old}'
+    if not ok:
+        msg += '，但退回后还有服务没正常启动，请重启设备'
+    set_job(st, 'rolled_back', version, msg, component='system')
+    return 1
+
+
+def install_system(conf, version):
+    st = load_status()
+    cur = system_version()
+    tree = SYSTEM / 'new'
+    try:
+        set_job(st, 'preparing', version, '正在准备', component='system')
+        m = fetch_manifest(conf, st)
+        note_system(st, m)
+        s = m.get('system')
+        if not s or not valid_system(s) or s['version'] != version:
+            raise Fail('更新服务器上的系统层版本变了，请重新点更新')
+        if version_key(version) <= version_key(cur):
+            raise Fail(f'系统层 {version} 不比现在的 {cur} 新')
+        missing = [p for p in s.get('requires', []) if not pkg_installed(p)]
+        if missing:
+            raise Fail(f'系统层 {version} 需要的软件包没装（{" ".join(missing)}），要重刷镜像才能用')
+        if shutil.disk_usage(OPT if OPT.exists() else STATE).free < s['file']['size'] * 4 + SPARE:
+            raise Fail('存储空间不够，没有安装')
+        before = health()
+        need_hub = bool(before and before.get('hub'))
+        need_audio = bool(before and before.get('audio'))
+        set_job(st, 'downloading', version, '正在下载', 0, component='system')
+        pkg = download(conf, m, s['file'], st, version, 0, s['file']['size'])
+        set_job(st, 'installing', version, '正在安装', component='system')
+        extract(pkg, tree, True)
+        entries, _ = read_table(tree)
+        if tree_id(tree, entries) != s['tree']:
+            raise Fail('系统层更新包和清单对不上，没有安装')
+        old = system_record()
+        dests = {e[1] for e in entries} | set(old.get('files', {}))
+        backup = make_backup(dests)
+    except Fail as e:
+        shutil.rmtree(tree, ignore_errors=True)
+        set_job(st, 'failed', version, str(e), component='system')
+        return 1
+    except Exception as e:  # noqa: BLE001 - anything else still has to reach the page
+        log('system install failed:', repr(e))
+        shutil.rmtree(tree, ignore_errors=True)
+        set_job(st, 'failed', version, f'安装出错：{e}', component='system')
+        return 1
+
+    # from here on files change: a power cut or an error puts the backup back
+    pending = {'from': cur, 'to': version, 'need_hub': need_hub, 'need_audio': need_audio, 'actions': sorted(
+        {a for e in entries for a in e[4] if a not in ('keep', 'none')} | {'reload'})}
+    write_durable(SYS_PENDING, json.dumps(pending))
+    try:
+        actions = apply_files(tree, entries, old, backup)
+        log('system: changed, restarting:', ' '.join(actions) or 'nothing')
+        pending['actions'] = actions
+        write_durable(SYS_PENDING, json.dumps(pending))
+        set_job(st, 'testing', version, '正在重启相关服务并自检', component='system')
+        take_effect(actions)
+        ok, why = system_self_test(actions, need_hub, TEST_SECONDS, need_audio)
+    except Fail as e:
+        ok, why = False, str(e)
+    except Exception as e:  # noqa: BLE001
+        log('system apply failed:', repr(e))
+        ok, why = False, f'安装出错：{e}'
+    if not ok:
+        log('system self-test failed:', why)
+        return system_rollback(st, pending, f'没装成功（{why}）', TEST_SECONDS)
+    write_record(version, tree, entries)
+    SYS_PENDING.unlink(missing_ok=True)
+    os.sync()
+    shutil.rmtree(tree, ignore_errors=True)
+    shutil.rmtree(DOWNLOAD, ignore_errors=True)
+    sysst = st.setdefault('system', {})
+    sysst.update(current=version, available=None, reboot='boot' in actions)
+    sysst.pop('failed', None)
+    msg = f'系统层已更新到 {version}'
+    if 'boot' in actions:
+        msg += '，部分改动重启设备后生效'
+    set_job(st, 'done', version, msg, component='system')
+    return 0
+
+
+def system_apply_checkout(tree):
+    """image/device-setup.sh files: install from a checkout, record its version; restarts are the
+    caller's (or a reboot)."""
+    tree = tree.resolve()
+    version = (tree / 'VERSION').read_text().strip()
+    if not VERSION_RE.fullmatch(version):
+        sys.exit(f'bad VERSION: {version!r}')
+    try:
+        entries, requires = read_table(tree)
+    except Fail as e:
+        sys.exit(str(e))
+    missing = [p for p in requires if not pkg_installed(p)]
+    if missing:
+        log('warning: packages the system layer needs are not installed:', ' '.join(missing))
+    backup = {e[1]: {'sha256': file_sha(target(e[1]))} for e in entries if e[0] == '-'}
+    try:
+        actions = apply_files(tree, entries, system_record(), backup)
+    except Fail as e:
+        sys.exit(str(e))
+    write_record(version, tree, entries)
+    st = load_status()
+    st.setdefault('system', {}).update(current=version, available=None)
+    save_status(st)
+    log(f'system layer {version} installed; changed: {" ".join(actions) or "nothing"}')
+    return 0
+
+
+def system_verify():
+    """For build-image.sh: the installed version and file-set id, and every recorded file intact."""
+    rec = system_record()
+    if not rec:
+        print(SYS_BASELINE, '-')
+        return 0
+    bad = [d for d, sha in rec.get('files', {}).items() if file_sha(target(d)) != sha]
+    print(rec['version'], rec.get('tree', '-'))
+    for d in bad:
+        print('changed since installed:', d, file=sys.stderr)
+    return 1 if bad else 0
+
+
 # ---- check, requests, boot ----
 
 def note_available(st, m, cur):
@@ -470,6 +1044,7 @@ def check(conf):
     try:
         m = fetch_manifest(conf, st)
         note_available(st, m, st['current'])
+        note_system(st, m)
         st['check_error'] = None
     except Fail as e:
         st['check_error'] = str(e)
@@ -477,7 +1052,7 @@ def check(conf):
         log('check failed:', repr(e))
         st['check_error'] = '检查更新出错'
     save_status(st)
-    log('check:', st.get('available'), st.get('check_error'))
+    log('check:', st.get('available'), (st.get('system') or {}).get('available'), st.get('check_error'))
     return 0
 
 
@@ -490,17 +1065,35 @@ def run(conf):
         try:
             if f.stat().st_size < 1024:
                 body = json.loads(f.read_text())
-                actions[body.get('action')] = str(body.get('version', ''))
+                actions[body.get('action')] = body
         except (OSError, ValueError, AttributeError):
             pass
         f.unlink(missing_ok=True)
     if 'install' in actions:
+        body = actions['install']
         st = load_status()
         avail = st.get('available') or {}
+        savail = (st.get('system') or {}).get('available') or {}
         # only what we checked ourselves; the request can't name an arbitrary version
-        if avail.get('version') and avail['version'] == actions['install']:
-            return install(conf, avail['version'])
-        log('install request ignored:', actions['install'], avail)
+        client_v = avail.get('version') if avail.get('version') == str(body.get('version', '')) else None
+        system_v = (savail.get('version') if savail.get('version') == str(body.get('system', ''))
+                    and not savail.get('missing') else None)
+        if client_v or system_v:
+            if system_v:
+                rc = install_system(conf, system_v)
+                if rc or not client_v:
+                    return rc          # a failed system layer stops here: the client waits
+            rc = install(conf, client_v)
+            if rc == 0 and system_v:
+                # both went in with one tap: say so in the one result the pages show (the client's
+                # own 已更新到 would hide the system layer's)
+                st = load_status()
+                msg = f'已更新到 系统层 {system_v} · 客户端 {client_v}'
+                if (st.get('system') or {}).get('reboot'):
+                    msg += '，部分改动重启设备后生效'
+                set_job(st, 'done', client_v, msg)
+            return rc
+        log('install request ignored:', body, avail, savail)
         return check(conf)
     if 'check' in actions:
         return check(conf)
@@ -515,6 +1108,30 @@ def recover(conf, seconds, why):
         shutil.rmtree(d, ignore_errors=True)
     st = load_status()
     try:
+        spending = json.loads(SYS_PENDING.read_text())
+    except (OSError, ValueError):
+        spending = None
+    shutil.rmtree(SYSTEM / 'new', ignore_errors=True)
+    if spending and system_record().get('version') == spending['to']:
+        # it passed its self-test and was recorded; only dropping the pending record didn't reach
+        # the disk. Rolling back now would run the old files under the new version's record.
+        log('recover: system layer', spending['to'], 'was already installed, keeping it')
+        SYS_PENDING.unlink(missing_ok=True)
+        os.sync()
+        sysst = st.setdefault('system', {})
+        sysst.update(current=spending['to'], available=None)
+        sysst.pop('failed', None)
+        if (st.get('job') or {}).get('state') in ACTIVE_JOBS:
+            set_job(st, 'done', spending['to'], f'系统层已更新到 {spending["to"]}', component='system')
+        else:
+            save_status(st)
+        spending = None
+    if spending:
+        # half-applied files or an untested switch: the backup is what last worked
+        log('recover: a system layer install was interrupted, putting the backup back')
+        system_rollback(st, spending, f'上次系统层更新被中断（{why}）', seconds)
+        return 0
+    try:
         pending = json.loads(PENDING.read_text())
     except (OSError, ValueError):
         pending = None
@@ -526,7 +1143,8 @@ def recover(conf, seconds, why):
         PENDING.unlink(missing_ok=True)
     job = st.get('job') or {}
     if job.get('state') in ACTIVE_JOBS:
-        set_job(st, 'failed', job.get('version'), f'上次更新被中断（{why}），没有改动')
+        set_job(st, 'failed', job.get('version'), f'上次更新被中断（{why}），没有改动',
+                component=job.get('component', 'client'))
     return 0
 
 
@@ -574,6 +1192,11 @@ def main():
         sys.exit(__doc__)
     conf = read_conf()
     cmd = sys.argv[1]
+    if cmd == 'selftest':       # run by an install of a new updater while the old one holds the lock
+        print(f'thinksmart-update {UPDATER_VERSION}', 'sources:', conf['SOURCES'] or '-')
+        return 0
+    if cmd == 'system-verify':
+        return system_verify()
     STATE.mkdir(parents=True, exist_ok=True)
     REQUESTS.mkdir(exist_ok=True)
     shutil.chown(REQUESTS, 'root', conf['REQUEST_GROUP'])
@@ -593,6 +1216,9 @@ def main():
             return boot(conf)
         if cmd == 'adopt' and len(sys.argv) in (3, 4):
             return adopt(sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else None)
+        if cmd == 'system-apply' and len(sys.argv) == 3:
+            return system_apply_checkout(Path(sys.argv[2]))
+
     sys.exit(__doc__)
 
 

@@ -248,3 +248,24 @@ def test_an_older_manifest_is_not_taken(tu, source):
     source['publish'](published='2026-10-01T10:00:00+08:00')
     tu.run_main('check')
     assert tu.load_status()['check_error'] == '连不上更新服务器'
+
+
+def test_a_cut_download_fails_cleanly_in_chinese(tu, source, monkeypatch):
+    """IncompleteRead (the connection dropped half way) is not an OSError: it used to escape the
+    retry and show its English text on the page."""
+    import http.client
+    tu.run_main('check')
+    real = tu.opener
+    calls = []
+
+    class Cut:
+        def open(self, req, timeout=None):
+            calls.append(req.full_url)
+            if '/download/client-v' not in req.full_url:
+                return real(tu.read_conf()).open(req, timeout=timeout)
+            raise http.client.IncompleteRead(b'part', 100)
+    monkeypatch.setattr(tu, 'opener', lambda conf: Cut())
+    assert tu.run_main('install', '1.2.0') == 1
+    msg = tu.load_status()['job']['message']
+    assert msg.startswith('下载失败') and 'IncompleteRead' not in msg and 'bytes' not in msg
+    assert tu.current_version() == '1.1.0'

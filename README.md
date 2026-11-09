@@ -786,6 +786,13 @@ wpctl get-volume @DEFAULT_AUDIO_SINK@
 - 设备上的麦克风开关（隐私开关）要打开，关着的时候语音助手听不到。
 - 服务都正常但还是没声音：重启设备。这台机器的音频 DSP 偶尔会卡住，只有重启能恢复。
 - **不要直接操作声卡硬件**（`speaker-test -D hw:…`、`aplay -D hw:…` 等），会让音频 DSP 卡死。所有声音都走 PipeWire。
+- 要单独重启 WirePlumber（比如改了它的配置），先停麦克风服务再重启，否则麦克风服务占着录音口，WirePlumber 找不到声卡，只剩一个 `Dummy Output`：
+
+  ```bash
+  systemctl --user stop thinksmart-mic && systemctl --user restart wireplumber && sleep 5 && systemctl --user start thinksmart-mic
+  ```
+
+  语音客户端会发现声音断了、自己重启（约 20 秒）。
 
 ### 3.5 开机进不了界面（黑屏、白屏、一直停在欢迎页）
 
@@ -936,6 +943,9 @@ tar tf userdata.tar | head -20
 
   它会拉新代码、补装依赖、重启网关。
 - **系统软件包**：`sudo apt update && sudo apt upgrade` 可以照常用。屏幕、声音、网络依赖的 41 个包（补丁版 Mesa、WebKitGTK、Weston、PipeWire、NetworkManager 等，清单在 `image/held-packages.txt`）锁在测过的版本上，不会被升级。内核和驱动不归 apt 管，也不会变。
+- **系统层**（展示屏外壳、欢迎页、屏幕键盘、熄屏和接近传感器、麦克风服务、音频和蓝牙音箱配置、更新服务自己）：和语音客户端在同一个「软件更新」里，有新版本时一起显示，点一次「更新」先装系统层再装客户端。装之前把要换的文件都备份下来，装完重启用到它们的服务（屏幕会闪一下）并自检，没通过就把备份放回去。系统层的更新包和客户端放在同一个 Release 里（客户端仓库），本仓库的 Releases 只放刷机镜像。只换本仓库 `image/system-files.txt` 里列的文件：内核、驱动、boot 分区和 apt 装的软件包不在里面，这些要重刷；你自己改过的 `/etc/thinksmart-kiosk.conf` 等配置不会被覆盖。
+
+  用 20261101 镜像刷的设备，第一次要先装一次客户端更新（它会顺带换上能装系统层的新更新服务），之后才能看到系统层更新。
 - **系统镜像本身**：有新版镜像时按[路线 B](#路线-b已经刷过本镜像或上游-ubuntu-镜像)重刷，记得先做[4.1 备份](#41-刷机前备份)。
 
 ---
@@ -978,6 +988,9 @@ bootstrap 阶段（[A5](#a5-ssh-登录-bootstrap)）的 USB 网络**并不保证
 - 日志只存在 systemd 日志里（持久保存，最多 64 MB、一个月），关掉了重复写一份到 `/var/log` 的 rsyslog。查日志用 `journalctl`。
 - 不生成程序崩溃转储（core dump），省磁盘；开了 zram 压缩内存。
 - 停用了用不上的 ModemManager、avahi、udisks2。
+- 屏幕键盘是系统键盘：展示屏外壳给每个页面都装上，点到输入框就从屏幕下方弹出（`kiosk/keyboard.js`）。页面只放普通输入框，不用自带键盘。
+- 语音客户端的设置页也能切换 WiFi：外壳只接受两种页面的 WiFi 请求，一是本地欢迎页，二是展示屏配置的地址恰好是本机（127.0.0.1/localhost，默认就是客户端）。展示屏指向别人的服务时不放权，局域网里的页面也碰不到。
+- 蓝牙音箱：只开 A2DP 接收（手机放歌给它），关掉免提（HFP/HSP），免得手机把通话声音转过来。手机的声音不直接送喇叭，而是交给语音客户端混进自己的输出，这样放歌时唤醒词照样能用（`bluetooth/`）。配对、开关、手机列表在客户端设置页，配对只在点了「添加手机」后的 3 分钟内接受，不用输密码。
 
 已知限制：
 
@@ -986,6 +999,8 @@ bootstrap 阶段（[A5](#a5-ssh-登录-bootstrap)）的 USB 网络**并不保证
 - 刷完后的系统不能用 USB 线登录，只能走 WiFi（见[刷完后的 USB 网络](#刷完后的-usb-网络)）。
 - 为了禁止双指缩放，屏幕只接收第一根手指。用屏幕键盘两指交替快速打字时，第一根手指还没抬起、第二根就按下，第二下会丢掉，少一个字。输 WiFi 密码时慢一点，一次一指。
 - 镜像里带的 GPU 固件、WiFi/蓝牙固件来源和上游相同（照上游做法）。
+- 手机用蓝牙放歌时，语音客户端一直在做回声消除，占一个核约 70%（不放歌时约 20%）。WiFi 和蓝牙是同一颗芯片，蓝牙放歌时 2.4 GHz WiFi 可能变慢。
+- 蓝牙在手机上显示为平板图标：设备类别由 BlueZ 按机型自动设，`main.conf` 里改不掉。
 
 ---
 
@@ -1004,7 +1019,8 @@ bootstrap 阶段（[A5](#a5-ssh-登录-bootstrap)）的 USB 网络**并不保证
 | `kiosk/` | 展示屏外壳（Weston + WebKitGTK 全屏页面）、欢迎页、屏幕键盘、GPU 看门狗、WiFi 省电和 NTP 设置 |
 | `screen/` | 自动熄屏、接近传感器和加速度唤醒 |
 | `xiaozhi/` | 麦克风服务和音频配置（ALSA、PipeWire、WirePlumber） |
-| `update/` | 语音客户端的在线更新 |
+| `bluetooth/` | 蓝牙音箱：WirePlumber 配置（只做 A2DP 接收，手机的声音交给语音客户端）、BlueZ 设置 |
+| `update/` | 在线更新（语音客户端和系统层） |
 | `mesa/` | 补丁版 Mesa（GPU 白屏、卡死修复）的构建脚本和补丁 |
 | `codec-dmic/`、`kernel/` | 第二颗麦克风的驱动和设备树补丁，以及构建它用的内核环境 |
 | `zram/` | zram 压缩内存 |

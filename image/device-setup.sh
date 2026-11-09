@@ -1,7 +1,8 @@
 #!/bin/sh
 # Turn a running ThinkSmart (the old Plasma-based image plus our services) into the release layout.
 # Run on the device as root from a copy of this repository:
-#   sudo sh image/device-setup.sh files            system-layer files from this tree (kiosk, screen, mic, zram)
+#   sudo sh image/device-setup.sh files            system-layer files from this tree (image/system-files.txt:
+#                                                  kiosk, screen, mic, zram, Bluetooth speaker, updater)
 #   sudo sh image/device-setup.sh update CLIENT    updater; CLIENT (a client tree with .venv) becomes
 #                                                  /opt/thinksmart/client/<version>
 #   sudo sh image/device-setup.sh kiosk            boot into the kiosk through thinksmart-kiosk.service, not SDDM
@@ -26,49 +27,10 @@ UCONF=$H/.config/systemd/user
 user_systemctl() { runuser -u $U -- env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user "$@"; }
 
 files() {
-    install -m 755 kiosk/thinksmart-kiosk.py kiosk/thinksmart-kiosk-session kiosk/thinksmart-kiosk-app \
-        kiosk/kiosk-mode kiosk/gpu-watchdog.py screen/idle-blanker.py screen/screen-wake-daemon.py \
-        screen/vcnl4200-proximity-daemon.py xiaozhi/thinksmart-mic /usr/local/bin/
-    install -d /usr/local/share/thinksmart-kiosk
-    install -m 644 kiosk/welcome.html kiosk/keyboard.js kiosk/qrcode.js /usr/local/share/thinksmart-kiosk/
-    [ -e /etc/thinksmart-kiosk.conf ] || install -m 644 kiosk/thinksmart-kiosk.conf /etc/
-    install -m 644 kiosk/thinksmart-gpu-watchdog.service screen/screen-wake.service \
-        zram/thinksmart-zram.service image/thinksmart-ssh-hostkeys.service /etc/systemd/system/
-    install -m 644 zram/99-zram.conf /etc/sysctl.d/
-    install -m 644 xiaozhi/asound.conf /etc/asound.conf
-    install -d -o $U -g $U $UCONF $H/.config/pipewire/pipewire.conf.d
-    install -m 644 -o $U -g $U screen/idle-blanker.service xiaozhi/thinksmart-mic.service $UCONF/
-    install -m 644 -o $U -g $U xiaozhi/10-thinksmart-rate.conf $H/.config/pipewire/pipewire.conf.d/
-    # Speaker S16LE and PipeWire kept off the DSP capture PCM. WirePlumber loads only the
-    # highest-priority file of a name, so the user copy decides; the system copy is kept equal
-    install -d -o $U -g $U $H/.config/wireplumber $H/.config/wireplumber/main.lua.d
-    install -m 644 -o $U -g $U xiaozhi/99-cd18781y-alsa.lua $H/.config/wireplumber/main.lua.d/
-    install -d /etc/wireplumber/main.lua.d
-    install -m 644 xiaozhi/99-cd18781y-alsa.lua /etc/wireplumber/main.lua.d/
-    # No core dumps (a crashing browser filled the disk); services this device has no use for
-    install -d /etc/systemd/coredump.conf.d
-    install -m 644 kiosk/coredump-off.conf /etc/systemd/coredump.conf.d/90-thinksmart-kiosk.conf
-    # Time servers reachable from China (no RTC battery: the clock is set from the network each boot)
-    install -d /etc/systemd/timesyncd.conf.d
-    install -m 644 kiosk/timesyncd-cn.conf /etc/systemd/timesyncd.conf.d/thinksmart.conf
-    # The proximity sensor is read straight from /dev/i2c-0, not through sudo i2cget once a second
-    usermod -aG i2c $U
-    # Wi-Fi power save off: the card misses DHCP replies with it (IPv4 minutes late after a boot)
-    install -d /etc/NetworkManager/conf.d
-    install -m 644 kiosk/wifi-powersave-off.conf /etc/NetworkManager/conf.d/zz-thinksmart-wifi-powersave-off.conf
-    systemctl mask ModemManager.service avahi-daemon.service avahi-daemon.socket udisks2.service >/dev/null 2>&1 || true
-    systemctl daemon-reload
-    systemctl enable thinksmart-gpu-watchdog.service screen-wake.service thinksmart-zram.service
-    # reenable: its WantedBy moved from multi-user.target to sysinit.target
-    systemctl reenable thinksmart-ssh-hostkeys.service
-    # reenable: thinksmart-mic gained WantedBy=pipewire-pulse.service, so it comes back whenever
-    # pipewire-pulse restarts; an existing install only has the default.target link
-    user_systemctl daemon-reload
-    user_systemctl reenable thinksmart-mic.service idle-blanker.service
-    # Only welcome.html, keyboard.js and qrcode.js are used here; the rest is from the first chat
-    # page and py-xiaozhi (vendor logos, an Edge TTS sample)
-    rm -rf /usr/local/share/thinksmart-kiosk/chat.html /usr/local/share/thinksmart-kiosk/logos \
-        /usr/local/share/thinksmart-kiosk/wake.wav
+    # The system layer: image/system-files.txt says what goes where, image/system-post.sh does the
+    # rest (service links, BlueZ settings). The online update installs the same table, so both
+    # ways end up with the same files; the version (VERSION) is recorded for the updater.
+    python3 update/thinksmart-update system-apply .
 }
 
 update() {
@@ -99,7 +61,7 @@ PURGE="sddm sddm-theme-* plasma-* kwin-* kwin-common libkwin* kglobalacceld kio-
  libqt5* qt5-* libllvm18 libclang1-18 libclang-cpp18 modemmanager"
 # Kept on purpose even if the purge would orphan them
 KEEP="weston gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0 gir1.2-gtk-3.0 python3-gi
- pipewire pipewire-pulse wireplumber libspa-0.2-modules pulseaudio-utils alsa-utils
+ pipewire pipewire-pulse wireplumber libspa-0.2-modules libspa-0.2-bluetooth pulseaudio-utils alsa-utils
  libegl-mesa0 libgbm1 libgl1-mesa-dri libglx-mesa0 mesa-libgallium mesa-va-drivers mesa-vdpau-drivers mesa-vulkan-drivers
  fonts-noto-cjk fonts-noto-core fonts-noto-ui-core fonts-noto-mono fonts-noto-color-emoji fonts-dejavu-core fonts-dejavu-mono
  locales tzdata network-manager wpasupplicant bluez openssh-server sudo git curl ffmpeg

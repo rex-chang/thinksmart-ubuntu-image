@@ -20,13 +20,16 @@ PS_CONF1_REG = 0x03
 PS_DATA_REG = 0x08
 ALS_CONF_REG = 0x00
 
-# PS_CONF1: PS_IT=4T, PS_DUTY=1/40, PS_PERS=2, PS_SD=0 (active)
+# PS_CONF1 (VCNL4200 layout: bits 7:6 PS_DUTY, 5:4 PS_PERS, 3:1 PS_IT, 0 PS_SD):
+# 0xCA = PS_DUTY 1/1280, PS_PERS 1, PS_IT 9T, PS_SD=0 (active)
 PS_CONF1_ENABLED = 0xCA
 PS_CONF2_ENABLED = 0x08
 PS_CONF1_DISABLED = 0xCB  # PS_SD bit set
 
 # PS_MS register (0x04): high byte bits[2:0] = LED_I
 # 000=50mA 001=75mA 010=100mA 011=120mA 100=140mA 101=160mA 110=180mA 111=200mA
+# On this board LED_I is only the gate drive of an external FET whose resistor sets the
+# IR LED current (datasheet Fig. 11); counts don't change with LED_I, only with PS_IT and pulses.
 PS_MS_REG = 0x04
 PS_LED_200MA = 0x0700  # low byte (PS_CONF3) = 0x00, high byte (PS_MS) = 0x07
 

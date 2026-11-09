@@ -1,7 +1,8 @@
 #!/bin/bash
 # Build the release image from a capture made by pull-from-device.sh:
 #   image/build-image.sh WORK_DIR OUT_DIR HUB_REPO [SECRETS_FILE]
-# WORK_DIR   has root.tar.zst, boot.tar.zst, versions.txt (hub commit, client version)
+# WORK_DIR   has root.tar.zst, boot.tar.zst, versions.txt (hub commit, client version, system layer
+#            version and file-set id)
 # OUT_DIR    gets <name>.img.xz, SHA256SUMS (.img.xz and .img), packages.txt
 # HUB_REPO   a checkout of xiaozhi-hub-server holding the captured commit (for the config template)
 # SECRETS_FILE (optional, keep it outside any repository) one literal string per line that must not
@@ -9,6 +10,11 @@
 # HUB_MAIN   (environment, default origin/main, fetched first) the hub's published main: the shipped
 #            commit must be on it, or every device's scripts/update.sh (git merge --ff-only) fails.
 #            HUB_MAIN=main checks against the local main before it is pushed (push before releasing).
+# RELEASE_MANIFEST (environment) the latest.json of the newest online update (a file, or the URL
+#            https://github.com/justhalfbit/xiaozhi-thinksmart-client/releases/latest/download/latest.json).
+#            The image must carry exactly that client and system layer version, so a freshly flashed
+#            device reports "up to date" instead of holding something no release has (publish the
+#            update first, then build the image). ALLOW_UNRELEASED=1 skips this, for test images.
 #
 # The image is the "system" partition content, like upstream's: an MBR disk with pmOS_boot (ext2) and
 # pmOS_root (ext4) at the original offsets and UUIDs, root shrunk to its content plus headroom. The
@@ -19,7 +25,26 @@ set -euo pipefail
 WORK=$(cd "${1:?work dir}" && pwd); OUT=${2:?out dir}; HUB=$(cd "${3:?hub repo}" && pwd); SECRETS=${4:-}
 HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
-read -r HUB_COMMIT CLIENT_VERSION < <(paste -sd' ' "$WORK/versions.txt")
+read -r HUB_COMMIT CLIENT_VERSION SYSTEM_VERSION SYSTEM_TREE < <(paste -sd' ' "$WORK/versions.txt")
+if [ "${ALLOW_UNRELEASED:-}" != 1 ]; then
+    : "${RELEASE_MANIFEST:?set RELEASE_MANIFEST to latest.json of the newest online update (or ALLOW_UNRELEASED=1)}"
+    python3 - "$RELEASE_MANIFEST" "$CLIENT_VERSION" "${SYSTEM_VERSION:-}" "${SYSTEM_TREE:-}" <<'PY' || exit 1
+import json, sys, urllib.request
+src, client, sysv, tree = sys.argv[1:]
+m = json.load(urllib.request.urlopen(src) if src.startswith('https://') else open(src))
+s = m.get('system') or {}
+bad = []
+if m.get('version') != client:
+    bad.append(f'client: image {client}, release {m.get("version")}')
+if s.get('version') != sysv or s.get('tree') != tree:
+    bad.append(f'system layer: image {sysv or "?"} ({tree[:12] or "?"}), release {s.get("version")} ({str(s.get("tree"))[:12]})')
+if bad:
+    print('the device does not carry the released versions (publish the update and install it on the device first):')
+    print('\n'.join('  ' + b for b in bad))
+    sys.exit(1)
+print(f'image carries the released client {client} and system layer {sysv}')
+PY
+fi
 NAME=${IMAGE_NAME:-thinksmart-ubuntu-$(date +%Y%m%d)}
 HUB_MAIN=${HUB_MAIN:-origin/main}
 [ "$HUB_MAIN" = origin/main ] && git -C "$HUB" fetch -q origin main

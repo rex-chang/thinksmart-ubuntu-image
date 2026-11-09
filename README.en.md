@@ -926,6 +926,9 @@ Prerequisites: flashed, Wi-Fi connected on the screen, `<DEVICE_IP>` known. The 
 - **Voice client**: check under 「软件更新」 (software update) in the settings page and tap 「更新」 (update) when a new version is available. Updates are downloaded over HTTPS only, the size and sha256 of every file are checked before installing, and a broken install rolls back to the old version automatically.
 
   To publish client updates yourself (for example of your own modified client): generate the update manifest and packages with `update/make-release.py` from this repository, upload the files to a Release of your own GitHub repository, and change `SOURCES` in `/etc/thinksmart-update.conf` on the device to your repository's Release address. No keys are needed. Updates aren't signed, so whatever the update address serves is installed as root: put only addresses you control or trust in `SOURCES`, **never a public GitHub download mirror or proxy site**. Usage in `update/README.md`.
+- **System layer** (kiosk shell, welcome page, screen keyboard, screen blanking and proximity, microphone service, audio and Bluetooth speaker configuration, the updater itself): shown in the same 「软件更新」 card as the client; one tap installs the system layer first, then the client. Every file about to be replaced is backed up first; after installing, the services using them restart (the screen flickers once) and are checked, and the backup goes back if they don't come up. System layer packages are published in the same Release as the client (on the client repository); this repository's Releases only hold images to flash. Only the files listed in `image/system-files.txt` are replaced: the kernel, drivers, boot partition and apt packages are not (those need a reflash), and configuration you changed such as `/etc/thinksmart-kiosk.conf` is never overwritten.
+
+  Devices flashed with the 20261101 image install one client update first (it brings the updater that can install the system layer); system layer updates show up after that.
 - **Hub**: in the hub admin page (`http://<DEVICE_IP>:16688/admin`), click 「更新网关」 (update hub) in the sidebar. The page shows the time and short commit hash of the current version and can check for a new one; it only installs when you click update, and a failed update rolls back automatically.
 
   From the command line instead, after SSH-ing into the device:
@@ -1004,7 +1007,7 @@ Known limitations:
 | `kiosk/` | The kiosk shell (Weston + a full-screen WebKitGTK page), welcome page, on-screen keyboard, GPU watchdog, Wi-Fi power-save and NTP settings |
 | `screen/` | Screen blanking, proximity and motion wake |
 | `xiaozhi/` | The microphone service and audio configuration (ALSA, PipeWire, WirePlumber) |
-| `update/` | Online updates of the voice client |
+| `update/` | Online updates (voice client and system layer) |
 | `mesa/` | Build script and patches of the patched Mesa (GPU white screen and hang fixes) |
 | `codec-dmic/`, `kernel/` | Driver and device-tree patch for the second microphone, and the kernel environment it is built in |
 | `zram/` | Compressed memory (zram) |

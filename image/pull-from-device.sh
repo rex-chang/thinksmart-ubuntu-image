@@ -21,5 +21,8 @@ trap '"$TS" "sudo systemctl start thinksmart-client; systemctl --user start xiao
         --exclude=./var/cache/apt/archives/*.deb --exclude=./var/log/journal/* \
         --exclude=./home/ubuntu/.cache --exclude=./lost+found . 2>/dev/null | zstd -3 -T4 -q' \
     > "$OUT/root.tar.zst"
-"$TS" 'git -C ~/xiaozhi-hub-server rev-parse HEAD; readlink /opt/thinksmart/client/current' > "$OUT/versions.txt"
+# hub commit, client version, then the system layer's version and file-set id (system-verify fails if
+# an installed system file was edited by hand since: the image would differ from the release)
+"$TS" 'git -C ~/xiaozhi-hub-server rev-parse HEAD; readlink /opt/thinksmart/client/current;
+       sudo /usr/local/sbin/thinksmart-update system-verify' > "$OUT/versions.txt"
 ls -l "$OUT"

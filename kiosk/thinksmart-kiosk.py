@@ -9,12 +9,18 @@ was removed, no network) the built-in welcome page is shown instead of WebKit's 
 page, and the URL is retried in the background until it answers. A device that has never
 been on a network (fresh image: no saved Wi-Fi, no address) also stays on the welcome page,
 where Wi-Fi is set up on the screen, even though the local voice client would load.
+
+Every page gets the on-screen keyboard (keyboard.js, injected): it slides up whenever a text field
+has focus, so pages only use plain <input>s. The welcome page and the configured page, when that is
+served by this device itself (127.0.0.1/localhost: the voice client's settings), may ask us to scan
+for and join Wi-Fi networks through window.webkit.messageHandlers.thinksmart.
 """
 import json
 import os
 import re
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -28,7 +34,9 @@ gi.require_version('WebKit2', '4.1')
 from gi.repository import GLib, Gtk, WebKit2  # noqa: E402
 
 CONF = '/etc/thinksmart-kiosk.conf'
-WELCOME = '/usr/local/share/thinksmart-kiosk/welcome.html'
+SHARE = '/usr/local/share/thinksmart-kiosk'
+WELCOME = SHARE + '/welcome.html'
+KEYBOARD = SHARE + '/keyboard.js'
 RETRY_SECONDS = 5
 
 
@@ -101,6 +109,18 @@ def needs_network_setup():
         return not device_status()['ip'] and not wifi_profiles()
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def wifi_status(_msg, _progress):
+    """The network Wi-Fi is on now (empty ssid: none), for the client's settings page."""
+    try:
+        out = nmcli('-t', '-f', 'ACTIVE,SSID,SIGNAL', 'dev', 'wifi', 'list', '--rescan', 'no', timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {'ok': False}
+    for f in map(nmcli_fields, out.splitlines()):
+        if len(f) >= 3 and f[0] == 'yes':
+            return {'ok': True, 'ssid': f[1], 'signal': int(f[2] or 0)}
+    return {'ok': True, 'ssid': '', 'signal': 0}
 
 
 def wifi_scan(_msg, _progress):
@@ -237,10 +257,11 @@ def wifi_connect(msg, progress):
 
 def wifi_forget(msg, _progress):
     ssid = str(msg.get('ssid') or '')
+    ok = True
     for name, uuid in wifi_profiles().items():
         if name == ssid:
-            nmcli('connection', 'delete', 'uuid', uuid)
-    return {'ok': True}
+            ok = nmcli('connection', 'delete', 'uuid', uuid).returncode == 0 and ok
+    return {'ok': ok}
 
 
 UPDATE_STATE = '/var/lib/thinksmart-update'
@@ -256,16 +277,51 @@ def update_status(_msg, _progress):
 
 
 def update_request(msg, _progress):
-    """Ask the updater to install the version the user tapped (it installs only what it checked)."""
+    """Ask the updater to install the versions the user tapped: the client's and/or the system
+    layer's (it installs only what it checked itself)."""
     action = 'install' if msg.get('cmd') == 'update_install' else 'check'
     try:
         tmp = os.path.join(UPDATE_STATE, 'requests', f'.{action}.tmp')
         with open(tmp, 'w') as f:
-            json.dump({'action': action, 'version': str(msg.get('version', ''))}, f)
+            json.dump({'action': action, 'version': str(msg.get('version') or ''),
+                       'system': str(msg.get('system') or '')}, f)
         os.replace(tmp, os.path.join(UPDATE_STATE, 'requests', action))
         return {'ok': True}
     except OSError:
         return {'ok': False}
+
+
+def run_command(handler, msg, progress):
+    """A page's command, always with an answer: a page waiting on one that never comes stays busy
+    (the Wi-Fi panel can't be closed). nmcli hanging past its timeout, NetworkManager restarting,
+    anything else: {ok: false} with a reason the pages know."""
+    try:
+        r = handler(msg, progress)
+        return r if isinstance(r, dict) else {'ok': False, 'reason': 'failed'}
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'reason': 'timeout'}
+    except Exception as e:  # noqa: BLE001 - the page still needs its answer
+        print(f'thinksmart-kiosk: {msg.get("cmd")} failed: {e!r}', file=sys.stderr, flush=True)
+        return {'ok': False, 'reason': 'failed', 'detail': str(e)[:120]}
+
+
+LOOPBACK = ('127.0.0.1', 'localhost', '::1')
+WIFI_COMMANDS = {'wifi_status': wifi_status, 'scan': wifi_scan, 'connect': wifi_connect, 'forget': wifi_forget}
+WELCOME_COMMANDS = dict(WIFI_COMMANDS, update_status=update_status, update_install=update_request,
+                        update_check=update_request)
+
+
+def page_commands(uri, url):
+    """What the page now on screen may ask for: the welcome page everything, the configured page
+    only Wi-Fi and only when this device serves it (the voice client's settings), others nothing.
+    A page on the network can't take over the device's Wi-Fi, nor can one the user navigates to."""
+    if uri.startswith('file://' + WELCOME):
+        return WELCOME_COMMANDS
+    page, conf = urllib.parse.urlparse(uri), urllib.parse.urlparse(url or '')
+    if (page.scheme in ('http', 'https') and (page.scheme, page.netloc) == (conf.scheme, conf.netloc)
+            and page.hostname in LOOPBACK):
+        return WIFI_COMMANDS
+    return {}
 
 
 def reachable(url):
@@ -306,6 +362,15 @@ def main():
     # The welcome page talks to us through window.webkit.messageHandlers.thinksmart (Wi-Fi setup)
     ucm = WebKit2.UserContentManager()
     ucm.register_script_message_handler('thinksmart')
+    # The system keyboard, on every page (top frame); thinksmartShell tells pages what we offer
+    shell = 'window.thinksmartShell = {version: 2, keyboard: true, wifi: true};'
+    try:
+        with open(KEYBOARD) as f:
+            shell += '\n' + f.read()
+    except OSError:
+        shell = shell.replace('keyboard: true', 'keyboard: false')
+    ucm.add_script(WebKit2.UserScript.new(shell, WebKit2.UserContentInjectedFrames.TOP_FRAME,
+                                          WebKit2.UserScriptInjectionTime.START, None, None))
     view = WebKit2.WebView(web_context=context, website_policies=policies, user_content_manager=ucm)
     settings = view.get_settings()
     # Developer tools only when profiling: WEBKIT_ENV="... WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222",
@@ -341,35 +406,38 @@ def main():
                                  -1, None, None, None, None, None)
 
     def on_message(_ucm, result):
-        # Only our own local page may ask for this; other pages (http) can't navigate to file://
-        if not (view.get_uri() or '').startswith('file://' + WELCOME):
-            return
+        uri = view.get_uri() or ''
+        commands = page_commands(uri, url)
         try:
             msg = json.loads(result.get_js_value().to_string())
         except ValueError:
             return
-        if msg.get('cmd') == 'busy':
+        if not isinstance(msg, dict):
+            return
+        if msg.get('cmd') == 'busy' and commands is WELCOME_COMMANDS:
             state['busy'] = bool(msg.get('value'))
             run_js('thinksmartReply', {'id': msg.get('id'), 'ok': True})
             return
-        handler = {'scan': wifi_scan, 'connect': wifi_connect, 'forget': wifi_forget,
-                   'update_status': update_status, 'update_install': update_request,
-                   'update_check': update_request}.get(msg.get('cmd'))
+        handler = commands.get(msg.get('cmd'))
         if handler is None:
+            if commands:
+                run_js('thinksmartReply', {'id': msg.get('id'), 'ok': False, 'reason': 'unknown'})
             return
 
         def progress(stage):
             GLib.idle_add(run_js, 'thinksmartProgress', {'id': msg.get('id'), 'stage': stage})
 
         def work():
-            r = handler(msg, progress)
+            r = run_command(handler, msg, progress)
             r['id'] = msg.get('id')
             # the address and Wi-Fi name may have just changed (not after the update polls: every 3 s)
-            st = None if msg.get('cmd', '').startswith('update_') else page_status()
+            st = None if str(msg.get('cmd', '')).startswith('update_') else page_status()
 
             def done():
+                if view.get_uri() != uri:  # the page changed meanwhile: the answer isn't for this one
+                    return False
                 run_js('thinksmartReply', r)
-                if st:
+                if st and commands is WELCOME_COMMANDS:
                     run_js('thinksmartStatus', st)
                 return False
             GLib.idle_add(done)

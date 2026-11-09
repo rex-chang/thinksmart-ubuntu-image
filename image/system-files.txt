@@ -1,0 +1,74 @@
+# The system layer: every file of this repository that goes onto the device, where it goes and what
+# has to restart when it changed. image/device-setup.sh files installs from it, and so does an
+# online update (update/thinksmart-update), which backs up every destination first and puts the
+# backup back if the restarted services don't come up. Nothing outside this table is touched by an
+# update (kernel, boot partition, apt packages, user data).
+#
+# SOURCE  DESTINATION  MODE  OWNER  ON-CHANGE (comma separated)
+#   SOURCE -       a file system-post.sh edits in place: backed up and compared, not installed
+#   kiosk          restart the screen (thinksmart-kiosk.service: Weston and the browser)
+#   mic            restart thinksmart-mic and the client
+#   wireplumber    stop thinksmart-mic, restart WirePlumber, start thinksmart-mic, restart the client,
+#                  volume put back (README 3.4); pipewire: the same with PipeWire itself
+#   bluetooth      restart bluetooth.service
+#   system:UNIT / user:UNIT   restart that unit (of the system / of user ubuntu)
+#   boot           read only at boot: "takes effect after a restart" on the page
+#   updater        this updater: the new copy must pass `thinksmart-update selftest`
+#   keep           user configuration: installed only if missing, never overwritten
+#   none           nothing to restart
+# Unit files also get a daemon-reload. Files a version drops from this table are removed.
+# require PACKAGE: an apt package the layer needs; a device without it is told to reflash.
+
+require libspa-0.2-bluetooth
+require python3-dbus
+require python3-gi
+
+# screen: shell, welcome page, system keyboard
+kiosk/thinksmart-kiosk.py           /usr/local/bin/thinksmart-kiosk.py              755 root kiosk
+kiosk/thinksmart-kiosk-session      /usr/local/bin/thinksmart-kiosk-session         755 root kiosk
+kiosk/thinksmart-kiosk-app          /usr/local/bin/thinksmart-kiosk-app             755 root kiosk
+kiosk/kiosk-mode                    /usr/local/bin/kiosk-mode                       755 root none
+kiosk/welcome.html                  /usr/local/share/thinksmart-kiosk/welcome.html  644 root kiosk
+kiosk/keyboard.js                   /usr/local/share/thinksmart-kiosk/keyboard.js   644 root kiosk
+kiosk/qrcode.js                     /usr/local/share/thinksmart-kiosk/qrcode.js     644 root kiosk
+kiosk/thinksmart-kiosk.service      /etc/systemd/system/thinksmart-kiosk.service    644 root kiosk
+kiosk/thinksmart-kiosk.pam          /etc/pam.d/thinksmart-kiosk                     644 root kiosk
+kiosk/thinksmart-kiosk.conf         /etc/thinksmart-kiosk.conf                      644 root keep
+kiosk/gpu-watchdog.py               /usr/local/bin/gpu-watchdog.py                  755 root system:thinksmart-gpu-watchdog.service
+kiosk/thinksmart-gpu-watchdog.service /etc/systemd/system/thinksmart-gpu-watchdog.service 644 root system:thinksmart-gpu-watchdog.service
+
+# screen blanking and waking
+screen/idle-blanker.py              /usr/local/bin/idle-blanker.py                  755 root user:idle-blanker.service
+screen/idle-blanker.service         /home/ubuntu/.config/systemd/user/idle-blanker.service 644 ubuntu user:idle-blanker.service
+screen/screen-wake-daemon.py        /usr/local/bin/screen-wake-daemon.py            755 root system:screen-wake.service
+screen/screen-wake.service          /etc/systemd/system/screen-wake.service         644 root system:screen-wake.service
+screen/vcnl4200-proximity-daemon.py /usr/local/bin/vcnl4200-proximity-daemon.py     755 root user:vcnl4200-proximity-daemon.service
+
+# audio: microphone service, ALSA, PipeWire, WirePlumber (user and system copies kept equal)
+xiaozhi/thinksmart-mic              /usr/local/bin/thinksmart-mic                   755 root mic
+xiaozhi/thinksmart-mic.service      /home/ubuntu/.config/systemd/user/thinksmart-mic.service 644 ubuntu mic
+xiaozhi/asound.conf                 /etc/asound.conf                                644 root mic
+xiaozhi/10-thinksmart-rate.conf     /home/ubuntu/.config/pipewire/pipewire.conf.d/10-thinksmart-rate.conf 644 ubuntu pipewire
+xiaozhi/99-cd18781y-alsa.lua        /home/ubuntu/.config/wireplumber/main.lua.d/99-cd18781y-alsa.lua 644 ubuntu wireplumber
+xiaozhi/99-cd18781y-alsa.lua        /etc/wireplumber/main.lua.d/99-cd18781y-alsa.lua 644 root wireplumber
+
+# Bluetooth speaker
+bluetooth/60-thinksmart-speaker.lua /etc/wireplumber/bluetooth.lua.d/60-thinksmart-speaker.lua 644 root wireplumber
+-                                   /etc/bluetooth/main.conf                        -   root bluetooth
+
+# memory, time, network, crash dumps, SSH host keys
+zram/thinksmart-zram.service        /etc/systemd/system/thinksmart-zram.service     644 root boot
+zram/99-zram.conf                   /etc/sysctl.d/99-zram.conf                      644 root boot
+kiosk/timesyncd-cn.conf             /etc/systemd/timesyncd.conf.d/thinksmart.conf   644 root system:systemd-timesyncd.service
+kiosk/wifi-powersave-off.conf       /etc/NetworkManager/conf.d/zz-thinksmart-wifi-powersave-off.conf 644 root boot
+kiosk/coredump-off.conf             /etc/systemd/coredump.conf.d/90-thinksmart-kiosk.conf 644 root none
+image/thinksmart-ssh-hostkeys.service /etc/systemd/system/thinksmart-ssh-hostkeys.service 644 root none
+
+# the updater itself
+update/thinksmart-update            /usr/local/sbin/thinksmart-update               755 root updater
+update/thinksmart-update.conf       /etc/thinksmart-update.conf                     644 root keep
+update/thinksmart-update-check.service /etc/systemd/system/thinksmart-update-check.service 644 root none
+update/thinksmart-update-check.timer /etc/systemd/system/thinksmart-update-check.timer 644 root none
+update/thinksmart-update-request.path /etc/systemd/system/thinksmart-update-request.path 644 root none
+update/thinksmart-update-run.service /etc/systemd/system/thinksmart-update-run.service 644 root none
+update/thinksmart-update-boot.service /etc/systemd/system/thinksmart-update-boot.service 644 root none
