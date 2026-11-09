@@ -77,6 +77,8 @@ POST bodies are JSON objects. `start` and `logout` require `{}`; `refresh` and `
 
 The login card is ephemeral and separate from persisted chat messages. The existing player bar and Hub music handler are independent of this voice-login flow.
 
+登录成功后卡片移除二维码图片，保留账号与完成状态，并提示可以说“播放一首歌”或“播放我的歌单”。登录只保存授权，不会自动开始播放；不需要再次扫码。
+
 ## Conversation regression verification
 
 Client deployments must exercise an ordinary request through `/api/text`, observe an actual reply and the `thinking → speaking → idle/listening` transitions on `/events`, and exercise setting the current volume through `/api/volume`. `/api/health` alone does not verify conversation or volume controls. Preserve `Client.volume_lock`, the `/api/sleep` and `/api/brightness` routes, and the conversation container when integrating login UI. The 2026-11-09 recovery restored these accidentally removed elements without modifying Hub model configuration.

@@ -989,16 +989,28 @@ function renderNeteaseLogin() {
   card.textContent = '';
   const title = document.createElement('h3');
   title.textContent = '网易云扫码登录';
-  const image = document.createElement('img');
-  image.className = 'netease-login-qr';
-  image.alt = '网易云登录二维码';
-  if (typeof task.qr_data_url === 'string' && task.qr_data_url.startsWith('data:image/png;base64,')) image.src = task.qr_data_url;
+  const hasQr = ['waiting_scan', 'scanned'].includes(task.state) &&
+    typeof task.qr_data_url === 'string' && task.qr_data_url.startsWith('data:image/png;base64,');
+  let image = null;
+  if (hasQr) {
+    image = document.createElement('img');
+    image.className = 'netease-login-qr';
+    image.alt = '网易云登录二维码';
+    image.src = task.qr_data_url;
+  }
   const status = document.createElement('p');
   const labels = { waiting_scan: '请用网易云 App 扫码', scanned: '已扫码，请在手机上确认', succeeded: '登录成功', expired: '二维码已过期', cancelled: '已取消登录', failed: '登录失败' };
   status.textContent = labels[task.state] || '正在准备二维码';
   const account = data.account || {};
   if (task.state === 'succeeded' && account.nickname) status.textContent += `：${account.nickname}`;
-  card.append(title, image, status);
+  card.append(title);
+  if (image) card.append(image);
+  card.append(status);
+  if (task.state === 'succeeded') {
+    const nextStep = document.createElement('p');
+    nextStep.textContent = '现在可以说「播放一首歌」或「播放我的歌单」。登录不会自动播放。';
+    card.append(nextStep);
+  }
   if (task.state === 'waiting_scan' || task.state === 'scanned') {
     const actions = document.createElement('div');
     actions.className = 'netease-login-actions';
