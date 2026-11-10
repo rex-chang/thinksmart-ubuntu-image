@@ -5,6 +5,8 @@ import subprocess
 import threading
 import time
 
+from . import eapi
+
 SOCKET_PATH = "/run/user/1000/thinksmart-mpv.sock"
 
 
@@ -215,6 +217,9 @@ class Player:
             t = self.queue[self.index]
             try:
                 stream = self.resolver(t.id, self.level)
+            except eapi.NeteaseError:
+                self.stop()
+                raise
             except Exception:
                 self._failures += 1
                 if self._failures >= 3:

@@ -1,6 +1,11 @@
 from dataclasses import dataclass, field
 import json
 
+from . import eapi
+
+API_SUCCESS = 200
+NETWORK_RISK_CODE = -460
+
 LEVELS = ["standard", "higher", "exhigh", "lossless", "hires"]
 
 
@@ -118,6 +123,9 @@ def song_url(client, track_id, level="exhigh"):
                 "encodeType": "flac" if lv in ("lossless", "hires") else "mp3",
             },
         )
+        code = res.get("code")
+        if code not in (None, API_SUCCESS):
+            raise eapi.NeteaseError(code)
         item = (res.get("data") or [{}])[0]
         if item.get("freeTrialInfo"):
             raise LookupError("unavailable")

@@ -146,3 +146,7 @@ conversation's `renderStatus`. The duplicate declaration caused startup to fail 
 before `connectEvents()`, leaving models and conversation state visually empty even though the Hub
 configuration remained intact. Verify the real page consumes SSE and displays the configured model
 and an ordinary reply after deployment.
+
+## Playback failures
+
+NetEase stream API errors are not missing audio-quality variants. In particular, provider code `-460` means the current network environment was flagged as risky: stop the request/queue immediately, return that failure to the user and emit a `music_error` event; do not continue requesting lower qualities or other tracks. Valid empty/unavailable streams retain the existing quality fallback. A chat reply saying “正在播放” is not evidence of playback: verify the `music` event and actual mpv file/position. The tool description requires a real tool invocation for each playback request and forbids claiming success before its result; this is model guidance, not a deterministic guarantee against hallucinated speech.

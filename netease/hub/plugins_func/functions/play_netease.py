@@ -35,6 +35,8 @@ PLAY_DESC = {
         "name": "play_netease",
         "description": (
             "用网易云音乐在线播放歌曲、歌手、每日推荐或我的歌单时调用；"
+            "每次播放请求都必须实际调用本工具，不能复述历史播放结果。"
+            "调用前只能说正在尝试，只有工具返回成功才能说正在播放；失败时如实说明。"
             "本机 music 目录里的音乐用 play_music。"
         ),
         "parameters": {
@@ -274,24 +276,24 @@ def _play_sync(conn, query, kind):
                 raise eapi.LoginRequired(301, "no profile")
             pl = _match_playlist(api.user_playlists(client, me["userId"]), name)
             if not pl:
-                return f"没找到歌单「{name}」"
+                return False, f"没找到歌单「{name}」"
             tracks = api.playlist_tracks(client, pl["id"])
             label = f"歌单「{pl.get('name', name)}」"
         else:
             if not query:
-                return "想听什么歌？说个歌名或歌手。"
+                return False, "想听什么歌？说个歌名或歌手。"
             tracks = api.search_songs(client, query, 30 if kind == "artist" else 10)
             label = ""
 
         if not tracks:
-            return f"没找到《{query}》，换个说法？"
+            return False, f"没找到《{query}》，换个说法？"
 
         if kind in ("daily", "playlist"):
             chosen, queue = tracks[0], tracks
         else:
             chosen = _pick(tracks, query)
             if not chosen:
-                return f"《{query}》要会员或没有版权，换一首？"
+                return False, f"《{query}》要会员或没有版权，换一首？"
             if kind == "artist":
                 related = [t for t in tracks
                            if t.id != chosen.id and _same_artist(t, query) and api.playable(t)]
@@ -303,7 +305,7 @@ def _play_sync(conn, query, kind):
         p.play_queue(queue)
         if not p.current:
             conn.logger.bind(tag=TAG).warning(f"no stream for {chosen.name!r}")
-            return f"《{chosen.name}》暂时放不了（版权或网络），换一首？"
+            return False, f"《{chosen.name}》暂时放不了（版权或网络），换一首？"
         # loadfile is asynchronous: wait until mpv actually holds a file, otherwise a
         # resolver/HTTP failure would still be reported as "正在播放".
         deadline = time.time() + 2.5
@@ -317,22 +319,24 @@ def _play_sync(conn, query, kind):
         if not started or not p.current:
             conn.logger.bind(tag=TAG).warning(f"mpv did not start {chosen.name!r}")
             p.stop()
-            return f"《{chosen.name}》暂时放不了（版权或网络），换一首？"
+            return False, f"《{chosen.name}》暂时放不了（版权或网络），换一首？"
         actual = p.current
         who = "、".join(actual.artists) or "未知歌手"
         if kind in ("daily", "playlist"):
-            return f"开始播放{label}，共 {len(queue)} 首，第一首《{actual.name}》- {who}"
+            return True, f"开始播放{label}，共 {len(queue)} 首，第一首《{actual.name}》- {who}"
         if kind == "artist" and len(queue) > 1:
-            return f"开始播放{query}，共 {len(queue)} 首，第一首《{actual.name}》- {who}"
-        return f"正在播放《{actual.name}》- {who}"
+            return True, f"开始播放{query}，共 {len(queue)} 首，第一首《{actual.name}》- {who}"
+        return True, f"正在播放《{actual.name}》- {who}"
     except eapi.LoginRequired:
-        return "还没有登录网易云，先运行 scripts/netease-login.py 扫码登录"
+        return False, "网易云登录态已失效，请说「登录网易云」重新扫码。"
     except eapi.NeteaseError as e:
         conn.logger.bind(tag=TAG).warning(f"netease api error: {e}")
-        return "网易云接口出错了，稍后再试"
+        if e.code == api.NETWORK_RISK_CODE:
+            return False, "网易云检测到当前网络环境存在风险，暂时无法播放，请稍后再试。"
+        return False, "网易云接口出错了，稍后再试"
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"play_netease failed: {e}")
-        return "网易云播放出错了，稍后再试"
+        return False, "网易云播放出错了，稍后再试"
 
 
 def _control_sync(conn, action, value):
@@ -531,8 +535,10 @@ async def music_command(conn, action, value=""):
 async def play_netease(conn, query: str = "", kind: str = "song"):
     if kind not in ("song", "artist", "daily", "playlist"):
         kind = "song"
-    text = await asyncio.to_thread(_play_sync, conn, query, kind)
+    is_started, text = await asyncio.to_thread(_play_sync, conn, query, kind)
     await _publish(conn)
+    if not is_started:
+        await _send(conn, {"subtype": "error", "message": text})
     return _say(text)
 
 
