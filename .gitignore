@@ -6,3 +6,6 @@ codec-dmic/out/
 __pycache__/
 *.pyc
 .DS_Store
+
+# local scratch space (release caches, notes, session recovery)
+.tmp/

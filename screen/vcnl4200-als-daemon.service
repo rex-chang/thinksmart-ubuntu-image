@@ -1,0 +1,17 @@
+[Unit]
+Description=VCNL4200 Ambient Light Daemon (publishes lux for auto-brightness)
+Documentation=file:///usr/local/bin/vcnl4200-als-daemon.py
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/vcnl4200-als-daemon.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# The sensor sits behind tinted glass: raise this if the published lux reads low
+# compared to a reference meter (1.0 = the kernel driver's own lx/count).
+#Environment=VCNL4200_ALS_GAIN=1.0
+
+[Install]
+WantedBy=default.target
