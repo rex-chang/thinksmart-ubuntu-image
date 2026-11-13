@@ -20,6 +20,7 @@ behind the dark front glass, which attenuates visible light, so the result can
 be scaled with VCNL4200_ALS_GAIN (default 1.0) to match a reference lux meter.
 """
 
+import json
 import logging
 import os
 import signal
@@ -48,6 +49,9 @@ MEDIAN_WINDOW = 5          # smooth out screen/room flicker
 LOG_INTERVAL = 300.0       # log at most this often (the journal is size-capped)
 LOG_CHANGE = 0.25          # ...or when lux moves by more than this fraction
 ALS_PATH = Path("/tmp/als_lux")
+# Newer idle-blanker / thinksmart_display read a JSON with a timestamp so stale readings
+# (sensor unplugged, daemon crashed) fall back to manual instead of pinning old brightness.
+ALS_JSON_PATH = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "thinksmart-als.json"
 
 # stdout goes to the journal (persistent, size-capped); a log file of its own grew without bound
 logging.basicConfig(
@@ -89,10 +93,14 @@ class AlsSensor:
 
 
 def publish(lux):
-    """Replace the file atomically: idle-blanker polls it and must never read half a number."""
+    """Replace the files atomically: readers poll them and must never see half a value."""
     tmp = ALS_PATH.with_name(ALS_PATH.name + ".tmp")
     tmp.write_text(f"{lux:.2f}\n")
     os.replace(tmp, ALS_PATH)
+    now = time.time()
+    jtmp = ALS_JSON_PATH.with_name(ALS_JSON_PATH.name + ".tmp")
+    jtmp.write_text(json.dumps({"lux": round(lux, 2), "at": now}) + "\n")
+    os.replace(jtmp, ALS_JSON_PATH)
 
 
 def main():
@@ -152,10 +160,11 @@ def main():
             time.sleep(max(0.2, SAMPLE_INTERVAL - (time.monotonic() - started)))
     finally:
         sensor.close()
-        try:
-            ALS_PATH.unlink()
-        except FileNotFoundError:
-            pass
+        for path in (ALS_PATH, ALS_JSON_PATH):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
         logger.info("Stopped")
     return 0
 

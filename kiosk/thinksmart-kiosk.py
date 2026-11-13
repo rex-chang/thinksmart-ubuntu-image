@@ -9,15 +9,11 @@ was removed, no network) the built-in welcome page is shown instead of WebKit's 
 page, and the URL is retried in the background until it answers. A device that has never
 been on a network (fresh image: no saved Wi-Fi, no address) also stays on the welcome page,
 where Wi-Fi is set up on the screen, even though the local voice client would load.
-
-Every page gets the on-screen keyboard (keyboard.js, injected): it slides up whenever a text field
-has focus, so pages only use plain <input>s. The welcome page and the configured page, when that is
-served by this device itself (127.0.0.1/localhost: the voice client's settings), may ask us to scan
-for and join Wi-Fi networks through window.webkit.messageHandlers.thinksmart.
 """
 import json
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -38,6 +34,7 @@ SHARE = '/usr/local/share/thinksmart-kiosk'
 WELCOME = SHARE + '/welcome.html'
 KEYBOARD = SHARE + '/keyboard.js'
 RETRY_SECONDS = 5
+_HOSTNAME = socket.gethostname()
 
 
 def read_conf():
@@ -49,13 +46,16 @@ def read_conf():
                 if not line or line.startswith('#') or '=' not in line:
                     continue
                 key, value = line.split('=', 1)
-                conf[key.strip()] = value.strip().strip('"\'')
+                v = value.strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+                    v = v[1:-1]
+                conf[key.strip()] = v
     except OSError:
         pass
     return conf
 
 
-def device_status():
+def device_status(include_ssid=True):
     """What the welcome page shows about the device: addresses, host name, Wi-Fi."""
     addrs = []
     try:
@@ -69,13 +69,16 @@ def device_status():
     ips = [ip for iface, ip in addrs if not iface.startswith('usb')]
     usb = next((ip for iface, ip in addrs if iface.startswith('usb')), '')
     ssid = ''
-    try:
-        out = subprocess.run(['nmcli', '-t', '-f', 'ACTIVE,SSID', 'dev', 'wifi'],
-                             capture_output=True, text=True, timeout=2).stdout
-        ssid = next((line[4:] for line in out.splitlines() if line.startswith('yes:')), '')
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return {'ip': ','.join(ips), 'usb': usb, 'host': socket.gethostname(), 'ssid': ssid}
+    if include_ssid:
+        try:
+            out = subprocess.run(['nmcli', '-t', '-f', 'ACTIVE,SSID', 'dev', 'wifi', 'list', '--rescan', 'no'],
+                                 capture_output=True, text=True, timeout=2).stdout
+            ssid = next((nmcli_fields(line)[1] for line in out.splitlines() if line.startswith('yes:')), '')
+            if not ssid:
+                ssid = _active_wifi_ssid()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return {'ip': ','.join(ips), 'usb': usb, 'host': _HOSTNAME, 'ssid': ssid}
 
 
 def nmcli(*args, timeout=10):
@@ -84,7 +87,23 @@ def nmcli(*args, timeout=10):
 
 def nmcli_fields(line):
     """Split one line of `nmcli -t` output (':' separated, '\\:' escaped)."""
-    return [f.replace('\\:', ':').replace('\\\\', '\\') for f in re.split(r'(?<!\\):', line)]
+    if '\\' not in line:
+        return line.split(':')
+    fields, field = [], []
+    i = 0
+    while i < len(line):
+        char = line[i]
+        if char == '\\' and i + 1 < len(line) and line[i + 1] in ('\\', ':'):
+            i += 1
+            field.append(line[i])
+        elif char == ':':
+            fields.append(''.join(field))
+            field.clear()
+        else:
+            field.append(char)
+        i += 1
+    fields.append(''.join(field))
+    return fields
 
 
 def connection_uuids(active=False):
@@ -92,21 +111,49 @@ def connection_uuids(active=False):
     return {f[0]: f[1] for f in map(nmcli_fields, out.splitlines()) if len(f) >= 2}
 
 
-def wifi_profiles():
+def _nmcli_multi_ssid(wifi_uuids):
+    raw = nmcli('-g', 'connection.uuid,802-11-wireless.ssid', 'connection', 'show', 'uuid', *wifi_uuids).stdout
+    uuid_set = set(wifi_uuids)
+    by_uuid = {}
+    lines = raw.splitlines()
+    i = 0
+    while i < len(lines):
+        u = lines[i]
+        if u in uuid_set and u not in by_uuid:
+            nxt = lines[i + 1] if i + 1 < len(lines) else ''
+            if nxt in uuid_set:
+                by_uuid[u] = ''
+                i += 1
+            else:
+                by_uuid[u] = nxt
+                i += 2
+        else:
+            i += 1
+    return [by_uuid.get(u, '') for u in wifi_uuids]
+
+
+def _active_wifi_ssid():
+    act = [u for u, kind in connection_uuids(active=True).items() if kind == '802-11-wireless']
+    if not act:
+        return ''
+    raw = _nmcli_multi_ssid(act[:1])
+    return nmcli_fields(raw[0])[0] if raw and raw[0] else ''
+
+
+def wifi_profiles(uuids=None):
     """Saved Wi-Fi networks (NetworkManager keeps their passwords): SSID -> profile UUID."""
-    profiles = {}
-    for uuid, kind in connection_uuids().items():
-        if kind == '802-11-wireless':
-            ssid = nmcli('-g', '802-11-wireless.ssid', 'connection', 'show', 'uuid', uuid).stdout.strip()
-            if ssid:
-                profiles[nmcli_fields(ssid)[0]] = uuid
-    return profiles
+    wifi_uuids = [u for u, kind in (uuids if uuids is not None else connection_uuids()).items()
+                  if kind == '802-11-wireless']
+    if not wifi_uuids:
+        return {}
+    out = _nmcli_multi_ssid(wifi_uuids)
+    return {nmcli_fields(s)[0]: u for u, s in zip(wifi_uuids, out) if s}
 
 
 def needs_network_setup():
     """Fresh device: no saved Wi-Fi network and no address on any other interface (USB aside)."""
     try:
-        return not device_status()['ip'] and not wifi_profiles()
+        return not device_status(include_ssid=False)['ip'] and '802-11-wireless' not in connection_uuids().values()
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -119,7 +166,8 @@ def wifi_status(_msg, _progress):
         return {'ok': False}
     for f in map(nmcli_fields, out.splitlines()):
         if len(f) >= 3 and f[0] == 'yes':
-            return {'ok': True, 'ssid': f[1], 'signal': int(f[2] or 0)}
+            ssid = f[1] or _active_wifi_ssid()
+            return {'ok': True, 'ssid': ssid, 'signal': int(f[2]) if f[2].isdigit() else 0}
     return {'ok': True, 'ssid': '', 'signal': 0}
 
 
@@ -133,10 +181,13 @@ def wifi_scan(_msg, _progress):
     best = {}  # one entry per SSID: the connected one, else the strongest access point
     for line in out.splitlines():
         f = nmcli_fields(line)
-        if len(f) < 4 or not f[1]:
+        if len(f) < 4:
             continue
-        n = {'ssid': f[1], 'signal': int(f[2] or 0), 'secure': f[3] not in ('', '--'),
-             'active': f[0] == '*', 'saved': f[1] in saved}
+        ssid = f[1] or (_active_wifi_ssid() if f[0] == '*' else '')
+        if not ssid:
+            continue
+        n = {'ssid': ssid, 'signal': int(f[2]) if f[2].isdigit() else 0, 'secure': f[3] not in ('', '--'),
+             'active': f[0] == '*', 'saved': ssid in saved}
         old = best.get(n['ssid'])
         if old is None or n['active'] or (not old['active'] and n['signal'] > old['signal']):
             best[n['ssid']] = n
@@ -164,14 +215,21 @@ def supplicant_state(path):
     return out.split('"')[1] if out.count('"') >= 2 else ''
 
 
-def supplicant_path():
+_SUPPLICANT_PATH = ''
+
+
+def supplicant_path(refresh=False):
+    global _SUPPLICANT_PATH
+    if _SUPPLICANT_PATH and not refresh:
+        return _SUPPLICANT_PATH
     try:
         out = subprocess.run(['busctl', 'call', 'fi.w1.wpa_supplicant1', '/fi/w1/wpa_supplicant1',
                               'fi.w1.wpa_supplicant1', 'GetInterface', 's', 'wlan0'],
                              capture_output=True, text=True, timeout=2).stdout
     except (OSError, subprocess.SubprocessError):
         return ''
-    return out.split('"')[1] if out.count('"') >= 2 else ''
+    _SUPPLICANT_PATH = out.split('"')[1] if out.count('"') >= 2 else ''
+    return _SUPPLICANT_PATH
 
 
 # A good password finishes the 4-way handshake in ~0.1 s (17 joins on this device: median 0.10 s,
@@ -195,6 +253,9 @@ def run_nmcli_watched(cmd, progress):
     left_old = False  # 'completed' only counts once the old network has been dropped
     while p.poll() is None:
         state = supplicant_state(path) if path else ''
+        if not state and path:
+            path = supplicant_path(refresh=True)
+            state = supplicant_state(path) if path else ''
         left_old = left_old or (state not in ('', 'completed'))
         new_stage = STAGES.get(state) if left_old else None
         if new_stage and new_stage != stage:
@@ -212,7 +273,15 @@ def run_nmcli_watched(cmd, progress):
     if p.poll() is None:
         wrong = handshake_since is not None
         p.terminate()
-        nmcli('device', 'disconnect', 'wlan0')  # stop the activation NetworkManager is still running
+        try:
+            p.communicate(timeout=2)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.communicate()
+        try:
+            nmcli('device', 'disconnect', 'wlan0')  # stop the activation NetworkManager is still running
+        except (OSError, subprocess.SubprocessError):
+            pass
         return False, 'Secrets were required' if wrong else 'Timeout'
     out, err = p.communicate()
     return p.returncode == 0, (err or out).strip()
@@ -223,14 +292,29 @@ def wifi_connect(msg, progress):
     ssid, password = str(msg.get('ssid') or ''), str(msg.get('password') or '')
     if not 0 < len(ssid.encode()) <= 32 or (password and not 8 <= len(password) <= 63):
         return {'ok': False, 'reason': 'invalid'}
-    before = connection_uuids()
-    previous = next((u for u, t in connection_uuids(active=True).items() if t == '802-11-wireless'), None)
-    saved = wifi_profiles().get(ssid)
-    # `dev wifi connect` writes a typed password into the saved profile; keep the old one so a
-    # typo doesn't cost the network that was working
-    old_psk = None
-    if saved and password:
-        old_psk = nmcli('-s', '-g', '802-11-wireless-security.psk', 'connection', 'show', 'uuid', saved).stdout.strip()
+    try:
+        before = connection_uuids()
+        previous = next((u for u, t in connection_uuids(active=True).items() if t == '802-11-wireless'), None)
+        saved = wifi_profiles(before).get(ssid)
+        # `dev wifi connect` writes a typed password into the saved profile; keep the old one so a
+        # typo doesn't cost the network that was working
+        # 2026-11-07 Claude: an empty psk read does not mean an open network (a failed read or an
+        # agent-owned secret also reads empty); decide by key-mgmt, which needs no secrets, so a
+        # failed join never strips the security off a WPA network that was working
+        old_psk = None
+        old_km = None
+        was_open = False
+        if saved and (password or msg.get('hidden')):
+            km = nmcli('-g', '802-11-wireless-security.key-mgmt', 'connection', 'show', 'uuid', saved)
+            if km.returncode == 0 and not km.stdout.strip():
+                was_open = True
+            elif km.returncode == 0:
+                old_km = km.stdout.strip()
+                r = nmcli('-s', '-g', '802-11-wireless-security.psk', 'connection', 'show', 'uuid', saved)
+                raw_psk = r.stdout.rstrip('\r\n') if r.returncode == 0 else ''
+                old_psk = nmcli_fields(raw_psk)[0] if raw_psk else None
+    except (OSError, subprocess.SubprocessError):
+        return {'ok': False, 'reason': 'failed'}
     if saved and not password and not msg.get('hidden'):
         cmd = ['--wait', '40', 'connection', 'up', 'uuid', saved]
     else:
@@ -246,22 +330,38 @@ def wifi_connect(msg, progress):
               'notfound' if 'No network with SSID' in err else
               'timeout' if 'Timeout' in err or 'timed out' in err else 'failed')
     # Don't keep a new profile with a wrong password around; put a saved one's password back
-    for uuid in set(connection_uuids()) - set(before):
-        nmcli('connection', 'delete', 'uuid', uuid)
-    if old_psk:
-        nmcli('connection', 'modify', 'uuid', saved, 'wifi-sec.psk', old_psk)
-    if previous:
+    try:
+        new_uuids = list(set(connection_uuids()) - set(before))
+        if new_uuids:
+            nmcli('connection', 'delete', 'uuid', *new_uuids)
+        if old_km and old_psk:
+            nmcli('connection', 'modify', 'uuid', saved, 'wifi-sec.key-mgmt', old_km, 'wifi-sec.psk', old_psk)
+        elif old_psk:
+            nmcli('connection', 'modify', 'uuid', saved, 'wifi-sec.psk', old_psk)
+        elif was_open:
+            nmcli('connection', 'modify', 'uuid', saved, 'remove', '802-11-wireless-security')
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if previous and (previous != saved or password or msg.get('hidden')):
         reconnect_later(previous)
     return {'ok': False, 'reason': reason, 'detail': err.splitlines()[-1][:120] if err else ''}
 
 
 def wifi_forget(msg, _progress):
     ssid = str(msg.get('ssid') or '')
-    ok = True
-    for name, uuid in wifi_profiles().items():
-        if name == ssid:
-            ok = nmcli('connection', 'delete', 'uuid', uuid).returncode == 0 and ok
-    return {'ok': ok}
+    if not ssid:
+        return {'ok': False}
+    try:
+        wifi_uuids = [u for u, kind in connection_uuids().items() if kind == '802-11-wireless']
+        if not wifi_uuids:
+            return {'ok': True}
+        out = _nmcli_multi_ssid(wifi_uuids)
+        del_uuids = [u for u, s in zip(wifi_uuids, out) if s and nmcli_fields(s)[0] == ssid]
+        if del_uuids and nmcli('connection', 'delete', 'uuid', *del_uuids).returncode != 0:
+            return {'ok': False}
+    except (OSError, subprocess.SubprocessError):
+        return {'ok': False}
+    return {'ok': True}
 
 
 UPDATE_STATE = '/var/lib/thinksmart-update'
@@ -271,7 +371,8 @@ def update_status(_msg, _progress):
     """What the root updater (thinksmart-update) found or is doing, for the welcome page."""
     try:
         with open(os.path.join(UPDATE_STATE, 'status.json')) as f:
-            return {'ok': True, 'update': json.load(f)}
+            data = json.load(f)
+        return {'ok': True, 'update': data} if isinstance(data, dict) else {'ok': False}
     except (OSError, ValueError):
         return {'ok': False}
 
@@ -281,26 +382,25 @@ def update_request(msg, _progress):
     layer's (it installs only what it checked itself)."""
     action = 'install' if msg.get('cmd') == 'update_install' else 'check'
     try:
-        tmp = os.path.join(UPDATE_STATE, 'requests', f'.{action}.tmp')
+        req_dir = os.path.join(UPDATE_STATE, 'requests')
+        os.makedirs(req_dir, exist_ok=True)
+        tmp = os.path.join(req_dir, f'.{action}.tmp')
         with open(tmp, 'w') as f:
             json.dump({'action': action, 'version': str(msg.get('version') or ''),
                        'system': str(msg.get('system') or '')}, f)
-        os.replace(tmp, os.path.join(UPDATE_STATE, 'requests', action))
+        os.replace(tmp, os.path.join(req_dir, action))
         return {'ok': True}
     except OSError:
         return {'ok': False}
 
 
 def run_command(handler, msg, progress):
-    """A page's command, always with an answer: a page waiting on one that never comes stays busy
-    (the Wi-Fi panel can't be closed). nmcli hanging past its timeout, NetworkManager restarting,
-    anything else: {ok: false} with a reason the pages know."""
     try:
         r = handler(msg, progress)
         return r if isinstance(r, dict) else {'ok': False, 'reason': 'failed'}
     except subprocess.TimeoutExpired:
         return {'ok': False, 'reason': 'timeout'}
-    except Exception as e:  # noqa: BLE001 - the page still needs its answer
+    except Exception as e:
         print(f'thinksmart-kiosk: {msg.get("cmd")} failed: {e!r}', file=sys.stderr, flush=True)
         return {'ok': False, 'reason': 'failed', 'detail': str(e)[:120]}
 
@@ -312,9 +412,6 @@ WELCOME_COMMANDS = dict(WIFI_COMMANDS, update_status=update_status, update_insta
 
 
 def page_commands(uri, url):
-    """What the page now on screen may ask for: the welcome page everything, the configured page
-    only Wi-Fi and only when this device serves it (the voice client's settings), others nothing.
-    A page on the network can't take over the device's Wi-Fi, nor can one the user navigates to."""
     if uri.startswith('file://' + WELCOME):
         return WELCOME_COMMANDS
     page, conf = urllib.parse.urlparse(uri), urllib.parse.urlparse(url or '')
@@ -324,6 +421,9 @@ def page_commands(uri, url):
     return {}
 
 
+_NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def reachable(url):
     """True once something answers at url (any HTTP status counts: the page itself decides)."""
     if not url:
@@ -331,9 +431,10 @@ def reachable(url):
     if url.startswith('file://'):
         return os.path.exists(urllib.parse.urlparse(url).path)
     try:
-        urllib.request.urlopen(url, timeout=2).close()
-        return True
-    except urllib.error.HTTPError:
+        with _NO_PROXY_OPENER.open(url, timeout=2):
+            return True
+    except urllib.error.HTTPError as e:
+        e.close()
         return True
     except (OSError, ValueError):
         return False
@@ -351,6 +452,8 @@ def main():
 
     data_dir = os.path.expanduser('~/.local/share/thinksmart-kiosk')
     cache_dir = os.path.expanduser('~/.cache/thinksmart-kiosk')
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(cache_dir, exist_ok=True)
     manager = WebKit2.WebsiteDataManager(base_data_directory=data_dir,
                                          base_cache_directory=cache_dir)
     manager.get_cookie_manager().set_persistent_storage(
@@ -362,15 +465,21 @@ def main():
     # The welcome page talks to us through window.webkit.messageHandlers.thinksmart (Wi-Fi setup)
     ucm = WebKit2.UserContentManager()
     ucm.register_script_message_handler('thinksmart')
-    # The system keyboard, on every page (top frame); thinksmartShell tells pages what we offer
     shell = 'window.thinksmartShell = {version: 2, keyboard: true, wifi: true};'
     try:
-        with open(KEYBOARD) as f:
+        with open(KEYBOARD, encoding='utf-8') as f:
             shell += '\n' + f.read()
     except OSError:
         shell = shell.replace('keyboard: true', 'keyboard: false')
     ucm.add_script(WebKit2.UserScript.new(shell, WebKit2.UserContentInjectedFrames.TOP_FRAME,
                                           WebKit2.UserScriptInjectionTime.START, None, None))
+    for addon in ('/usr/local/share/thinksmart-home/home_overlay.js',):
+        try:
+            with open(addon, encoding='utf-8') as script:
+                ucm.add_script(WebKit2.UserScript.new(script.read(), WebKit2.UserContentInjectedFrames.TOP_FRAME,
+                                                      WebKit2.UserScriptInjectionTime.END, None, None))
+        except OSError:
+            pass
     view = WebKit2.WebView(web_context=context, website_policies=policies, user_content_manager=ucm)
     settings = view.get_settings()
     # Developer tools only when profiling: WEBKIT_ENV="... WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222",
@@ -379,7 +488,7 @@ def main():
     settings.set_enable_smooth_scrolling(True)
     settings.set_media_playback_requires_user_gesture(False)
     # GPU=never|on-demand|always in the conf. CPU rendering is the fallback default; GPU needs
-    # the freedreno GMEM fix (mesa/ in this repository) or FD_MESA_DEBUG=sysmem, see README.
+    # the freedreno GMEM fix (kernel-build/mesa) or FD_MESA_DEBUG=sysmem, see README.
     policy = {
         'on-demand': WebKit2.HardwareAccelerationPolicy.ON_DEMAND,
         'always': WebKit2.HardwareAccelerationPolicy.ALWAYS,
@@ -387,16 +496,18 @@ def main():
     settings.set_hardware_acceleration_policy(policy)
     # WEBKIT_FEATURES="-Name +Name": switch WebKit feature flags (names from
     # WebKit2.Settings.get_all_features()), e.g. to turn off partial-repaint damage tracking
-    features = {}
-    all_features = WebKit2.Settings.get_all_features()
-    for i in range(all_features.get_length()):
-        features[all_features.get(i).get_identifier()] = all_features.get(i)
-    for item in conf.get('WEBKIT_FEATURES', '').split():
-        name = item.lstrip('+-')
-        if name in features:
-            settings.set_feature_enabled(features[name], not item.startswith('-'))
-        else:
-            print(f'thinksmart-kiosk: unknown WebKit feature {name}', flush=True)
+    feat_items = conf.get('WEBKIT_FEATURES', '').split()
+    if feat_items:
+        features = {}
+        all_features = WebKit2.Settings.get_all_features()
+        for i in range(all_features.get_length()):
+            features[all_features.get(i).get_identifier()] = all_features.get(i)
+        for item in feat_items:
+            name = item.lstrip('+-')
+            if name in features:
+                settings.set_feature_enabled(features[name], not item.startswith('-'))
+            else:
+                print(f'thinksmart-kiosk: unknown WebKit feature {name}', flush=True)
 
     # busy: the Wi-Fi sheet is open on the welcome page, don't switch pages under the user's fingers
     state = {'welcome': False, 'tries': 0, 'checking': False, 'busy': False}
@@ -417,6 +528,8 @@ def main():
         if msg.get('cmd') == 'busy' and commands is WELCOME_COMMANDS:
             state['busy'] = bool(msg.get('value'))
             run_js('thinksmartReply', {'id': msg.get('id'), 'ok': True})
+            if not state['busy']:
+                check_target()
             return
         handler = commands.get(msg.get('cmd'))
         if handler is None:
@@ -430,11 +543,12 @@ def main():
         def work():
             r = run_command(handler, msg, progress)
             r['id'] = msg.get('id')
-            # the address and Wi-Fi name may have just changed (not after the update polls: every 3 s)
-            st = None if str(msg.get('cmd', '')).startswith('update_') else page_status()
+            # the address and Wi-Fi name may have just changed on the welcome page (not after update polls)
+            st = (page_status() if commands is WELCOME_COMMANDS
+                  and not str(msg.get('cmd', '')).startswith('update_') else None)
 
             def done():
-                if view.get_uri() != uri:  # the page changed meanwhile: the answer isn't for this one
+                if view.get_uri() != uri:
                     return False
                 run_js('thinksmartReply', r)
                 if st and commands is WELCOME_COMMANDS:
@@ -452,6 +566,7 @@ def main():
 
     def show_welcome():
         state['welcome'] = True
+        state['busy'] = False
         view.load_uri('file://' + WELCOME + '?' + urllib.parse.urlencode(page_status()))
 
     def on_load_failed(_view, _event, failing_uri, error):
@@ -469,7 +584,7 @@ def main():
 
             def work():
                 ok = reachable(url) and not needs_network_setup()
-                st = None if ok else page_status()
+                st = page_status() if (not ok or state['busy']) else None
 
                 def done():
                     state['checking'] = False
@@ -482,6 +597,9 @@ def main():
                         state['tries'] += 1
                         st['tries'] = state['tries']
                         run_js('thinksmartStatus', st)
+                    elif st:
+                        st['tries'] = state['tries']
+                        run_js('thinksmartStatus', st)
                     return False
                 GLib.idle_add(done)
             threading.Thread(target=work, daemon=True).start()
@@ -489,6 +607,8 @@ def main():
 
     def reload():
         if url and not needs_network_setup():
+            state['welcome'] = False
+            state['busy'] = False
             view.load_uri(url)
         else:
             show_welcome()
@@ -514,6 +634,8 @@ def main():
     window.connect('destroy', Gtk.main_quit)
     window.fullscreen()
     window.show_all()
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, _sig, lambda *_: (Gtk.main_quit(), False)[1])
     reload()
     Gtk.main()
 

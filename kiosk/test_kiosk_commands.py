@@ -46,13 +46,25 @@ def test_other_pages_get_nothing():
 
 
 def test_forget_reports_whether_nmcli_deleted_it(monkeypatch):
-    # the pages say 已忘记 only on ok: a failed delete must not answer ok
-    monkeypatch.setattr(kiosk, 'wifi_profiles', lambda: {'Home': 'u1', 'Other': 'u2'})
-    calls = []
+    # the pages say 已忘记 only on ok: a failed delete must not answer ok.
+    # The new forget deletes every profile whose SSID matches (duplicates included).
+    delete_calls = []
+
+    def fake_nmcli(*args, timeout=10):
+        if args[:3] == ('-t', '-f', 'UUID,TYPE'):
+            return types.SimpleNamespace(stdout='u1:802-11-wireless\nu9:802-11-wireless\nu2:bridge\n', returncode=0)
+        if args[0] == '-g':   # uuid/ssid pairs: u1 Home, u9 Other
+            return types.SimpleNamespace(stdout='u1\nHome\nu9\nOther\n', returncode=0)
+        if args[:2] == ('connection', 'delete'):
+            delete_calls.append(args)
+            return types.SimpleNamespace(stdout='', returncode=fake_nmcli.code)
+        raise AssertionError(f'unexpected nmcli call: {args}')
+
+    monkeypatch.setattr(kiosk, 'nmcli', fake_nmcli)
     for code, ok in ((0, True), (10, False)):
-        monkeypatch.setattr(kiosk, 'nmcli', lambda *a, code=code, **k: (calls.append(a), types.SimpleNamespace(returncode=code))[1])
+        fake_nmcli.code = code
         assert kiosk.wifi_forget({'ssid': 'Home'}, None) == {'ok': ok}
-    assert calls == [('connection', 'delete', 'uuid', 'u1')] * 2
+    assert delete_calls == [('connection', 'delete', 'uuid', 'u1')] * 2
 
 
 def test_a_command_that_raises_still_answers():

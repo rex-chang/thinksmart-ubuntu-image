@@ -1,0 +1,11 @@
+[Unit]
+Description=VCNL4200 proximity wake daemon (wake the blanked screen on hand-wave)
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/vcnl4200-proximity-daemon.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
