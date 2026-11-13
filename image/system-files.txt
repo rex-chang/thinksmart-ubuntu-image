@@ -43,6 +43,42 @@ screen/idle-blanker.service         /home/ubuntu/.config/systemd/user/idle-blank
 screen/screen-wake-daemon.py        /usr/local/bin/screen-wake-daemon.py            755 root system:screen-wake.service
 screen/screen-wake.service          /etc/systemd/system/screen-wake.service         644 root system:screen-wake.service
 screen/vcnl4200-proximity-daemon.py /usr/local/bin/vcnl4200-proximity-daemon.py     755 root user:vcnl4200-proximity-daemon.service
+screen/vcnl4200-proximity-daemon.service /home/ubuntu/.config/systemd/user/vcnl4200-proximity-daemon.service 644 ubuntu user:vcnl4200-proximity-daemon.service
+screen/vcnl4200-als-daemon.py        /usr/local/bin/vcnl4200-als-daemon.py          755 root user:vcnl4200-als-daemon.service
+screen/vcnl4200-als-daemon.service   /home/ubuntu/.config/systemd/user/vcnl4200-als-daemon.service 644 ubuntu user:vcnl4200-als-daemon.service
+
+# home dashboard (merged from fubin0478/thinksmart-view, MIT). thinksmart-home needs the
+# /opt/thinksmart-addons venv (aiohttp + lunar_python) — home/deploy.sh creates it and enables
+# the units; until then files sit there inactive and the OTA layer only restarts what is on.
+home/thinksmart-home.py               /usr/local/bin/thinksmart-home.py               755 root system:thinksmart-home.service
+home/thinksmart_display.py            /usr/local/bin/thinksmart_display.py            755 root user:idle-blanker.service,system:thinksmart-home.service
+home/thinksmart-home.service          /etc/systemd/system/thinksmart-home.service     644 root system:thinksmart-home.service
+home/share/index.html                 /usr/local/share/thinksmart-home/index.html     644 root system:thinksmart-home.service
+home/share/apps.json                  /usr/local/share/thinksmart-home/apps.json      644 root system:thinksmart-home.service
+home/share/display.html               /usr/local/share/thinksmart-home/display.html   644 root system:thinksmart-home.service
+home/share/home_overlay.js            /usr/local/share/thinksmart-home/home_overlay.js 644 root kiosk
+
+# 可视对讲 (optional: camera + GStreamer; the tunnel needs /etc/thinksmart-intercom keys,
+# enable with home/deploy.sh --intercom)
+intercom/thinksmart-intercom.py       /usr/local/bin/thinksmart-intercom.py           755 root system:thinksmart-intercom.service
+intercom/thinksmart-intercom-ui.py    /usr/local/bin/thinksmart-intercom-ui.py        755 root system:thinksmart-intercom.service
+intercom/thinksmart-intercom-tunnel.sh /usr/local/bin/thinksmart-intercom-tunnel.sh   755 root system:thinksmart-intercom-tunnel.service
+intercom/thinksmart-intercom.service  /etc/systemd/system/thinksmart-intercom.service 644 root system:thinksmart-intercom.service
+intercom/thinksmart-intercom-tunnel.service /etc/systemd/system/thinksmart-intercom-tunnel.service 644 root system:thinksmart-intercom-tunnel.service
+intercom/share/favicon.svg            /usr/local/share/thinksmart-intercom/favicon.svg 644 root system:thinksmart-intercom.service
+intercom/share/apple-touch-icon.png   /usr/local/share/thinksmart-intercom/apple-touch-icon.png 644 root system:thinksmart-intercom.service
+
+# AirPlay 接收 (optional: needs the uxplay binary, enable with home/deploy.sh --airplay)
+airplay/thinksmart-airplay.py         /usr/local/bin/thinksmart-airplay.py            755 root user:thinksmart-airplay.service
+airplay/thinksmart-airplay.service    /home/ubuntu/.config/systemd/user/thinksmart-airplay.service 644 ubuntu user:thinksmart-airplay.service
+airplay/90-airplay-tcp.conf           /etc/sysctl.d/90-airplay-tcp.conf               644 root boot
+
+# USB host 模式与 U 盘自动挂载
+usb/usb-mode                          /usr/local/bin/usb-mode                         755 root none
+usb/usb-automount.sh                  /usr/local/bin/usb-automount.sh                 755 root none
+usb/thinksmart-usb-host.service       /etc/systemd/system/thinksmart-usb-host.service 644 root none
+usb/thinksmart-usb-mount@.service     /etc/systemd/system/thinksmart-usb-mount@.service 644 root none
+usb/99-usb-automount.rules            /etc/udev/rules.d/99-usb-automount.rules        644 root boot
 
 # audio: microphone service, ALSA, PipeWire, WirePlumber (user and system copies kept equal)
 xiaozhi/thinksmart-mic              /usr/local/bin/thinksmart-mic                   755 root mic

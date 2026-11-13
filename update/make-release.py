@@ -106,7 +106,8 @@ def sha256(path):
     return h.hexdigest()
 
 
-SYSTEM_DIRS = ['kiosk', 'screen', 'xiaozhi', 'bluetooth', 'zram', 'update', 'VERSION',
+SYSTEM_DIRS = ['kiosk', 'screen', 'xiaozhi', 'bluetooth', 'zram', 'update', 'home', 'intercom',
+               'airplay', 'usb', 'VERSION',
                'image/system-files.txt', 'image/system-post.sh', 'image/thinksmart-ssh-hostkeys.service']
 
 
