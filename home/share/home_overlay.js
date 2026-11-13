@@ -3,7 +3,7 @@
 //  * 127.0.0.1:8090 (XiaoZhi):
 //    - Lays our home page (thinksmart-home, 127.0.0.1:8095) over XiaoZhi as a persistent frame
 //      (#tsHomeLayer, z-index 9000) so returning home is instant with zero XiaoZhi flash.
-//    - Opens sub-pages (QQ音乐 :8091, 服务器监控 :8092, etc.) in an upper full-screen frame
+//    - Opens sub-pages (网易云音乐 :8091, 服务器监控 :8092, etc.) in an upper full-screen frame
 //      (#tsSubLayer, z-index 9100) instead of unloading :8090, so 「回桌面」 / 「主页」 reveals the
 //      already-warm home page immediately without reloading :8090 or flashing XiaoZhi.
 //    - Opens XiaoZhi's 「设置」 / 「WiFi」 sheets (z-index 9200+) directly over #tsHomeLayer when
@@ -554,7 +554,7 @@
     }
     if (!entry) {
       const f = document.createElement('iframe');
-      const title = u.port === '8091' ? 'QQ音乐' : '服务器监控';
+      const title = u.port === '8091' ? '网易云音乐' : '服务器监控';
       const winName = u.port === '8091' ? 'ts-prewarm' : 'ts-monitor-prewarm';
       f.title = title;
       subLayer.insertBefore(f, subLoading);
@@ -589,7 +589,7 @@
       return true;
     }
     subLayer.classList.remove('ready', 'warm');
-    subLabelEl.textContent = u.port === '8091' ? '正在打开 QQ音乐' : '正在连接服务器';
+    subLabelEl.textContent = u.port === '8091' ? '正在打开网易云音乐' : '正在连接服务器';
     root.classList.add('ts-sub');
     apply();
     if (!entry.loading) {
