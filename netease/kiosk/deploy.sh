@@ -23,8 +23,8 @@ set -euo pipefail
 HOST=${HOST:-ubuntu@10.9.1.60}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 read -r -a SSH_OPTS <<< "${SSH_OPTS:-}"
-SSH=(ssh "${SSH_OPTS[@]}")
-SCP=(scp "${SSH_OPTS[@]}")
+SSH=(ssh ${SSH_OPTS[@]+"${SSH_OPTS[@]}"})
+SCP=(scp ${SSH_OPTS[@]+"${SSH_OPTS[@]}"})
 
 if [ -z "${CLIENT_DIR:-}" ]; then
     echo "error: set CLIENT_DIR to a clean checkout of the integrated client" >&2

@@ -8,10 +8,11 @@ SRV=/home/ubuntu/xiaozhi-hub-server/main/xiaozhi-server
 # The Hub runs its own virtualenv; the system python3 has no requests/aiohttp
 PYTHON=$SRV/.venv/bin/python3
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-# Extra options for ssh/scp (e.g. a dedicated key and known_hosts file: see ts.sh)
+# Extra options for ssh/scp (e.g. a dedicated key and known_hosts file: see ts.sh).
+# ${arr[@]+...} keeps macOS' bash 3.2 happy with an empty array under set -u.
 read -r -a SSH_OPTS <<< "${SSH_OPTS:-}"
-SSH=(ssh "${SSH_OPTS[@]}")
-SCP=(scp "${SSH_OPTS[@]}")
+SSH=(ssh ${SSH_OPTS[@]+"${SSH_OPTS[@]}"})
+SCP=(scp ${SSH_OPTS[@]+"${SSH_OPTS[@]}"})
 
 # Back up only what this deployment can change: the Hub checkout holds a ~1 GB .venv, and a full
 # copy filled the device's 6.4 GB root partition (2026-11-09).

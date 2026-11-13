@@ -27,8 +27,8 @@ for arg in "$@"; do
 done
 
 read -r -a SSH_OPTS <<< "${SSH_OPTS:-}"
-SSH=(ssh "${SSH_OPTS[@]}")
-SCP=(scp "${SSH_OPTS[@]}")
+SSH=(ssh ${SSH_OPTS[@]+"${SSH_OPTS[@]}"})
+SCP=(scp ${SSH_OPTS[@]+"${SSH_OPTS[@]}"})
 
 echo "==> staging the system layer on $HOST"
 "${SSH[@]}" "$HOST" "rm -rf $STAGE && mkdir -p $STAGE"
