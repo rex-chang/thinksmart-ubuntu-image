@@ -24,9 +24,10 @@ SCP=(scp "${SSH_OPTS[@]}")
     "$ROOT/netease/hub/scripts/netease-selftest.py" "$HOST:$SRV/scripts/"
 "${SCP[@]}" "$ROOT/netease/hub/patch/apply_abort_hook.py" \
     "$ROOT/netease/hub/patch/apply_music_handler.py" \
-    "$ROOT/netease/hub/patch/apply_netease_login_api.py" "$HOST:$SRV/scripts/"
+    "$ROOT/netease/hub/patch/apply_netease_login_api.py" \
+    "$ROOT/netease/hub/patch/apply_netease_music_api.py" "$HOST:$SRV/scripts/"
 
-"${SSH[@]}" "$HOST" "cd $SRV && python3 scripts/apply_music_handler.py . && python3 scripts/apply_netease_login_api.py ."
+"${SSH[@]}" "$HOST" "cd $SRV && python3 scripts/apply_music_handler.py . && python3 scripts/apply_netease_login_api.py . && python3 scripts/apply_netease_music_api.py ."
 
 "${SSH[@]}" "$HOST" "sudo apt-get install -y --no-install-recommends mpv qrencode >/dev/null && mpv --version | head -1 && qrencode --version | head -1"
 "${SSH[@]}" "$HOST" "cd $SRV && $PYTHON -m py_compile plugins_func/netease/*.py scripts/netease-*.py core/admin/admin_handler.py"
@@ -42,4 +43,5 @@ echo "Complete client (UI + Bluetooth): CLIENT_DIR=../xiaozhi-thinksmart-client-
 echo "CLIENT_DIR must be a committed checkout whose __version__ is newer than the device's client."
 echo "CLI login: ssh $HOST 'cd $SRV && python3 scripts/netease-login.py'"
 echo "Kiosk API: GET http://127.0.0.1:16688/kiosk/netease/login/status"
+echo "Music API (thinksmart-home): GET http://127.0.0.1:16688/kiosk/netease/music/status"
 echo "Voice trigger: 登录网易云；card stays in the current conversation."
