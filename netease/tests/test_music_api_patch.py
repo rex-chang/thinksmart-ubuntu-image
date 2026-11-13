@@ -159,6 +159,29 @@ class TestMusicPatch(unittest.TestCase):
         text = path.read_text()
         self.assertIn("NETEASE_LOGIN_API_PATCH_V1", text)
         self.assertIn("NETEASE_MUSIC_API_PATCH_V1", text)
+        self.assertIn("NETEASE_MUSIC_API_PATCH_V2", text)
+
+    def test_fixes_reach_a_device_with_old_v2(self):
+        # Simulate a device that already has V1+V2 but without the play_queue body-cap fix.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("patch_mod", PATCH)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        root, path = self.make_tree()
+        self.assertEqual(self.run_patch(root).returncode, 0)
+        text = path.read_text()
+        for old, new in mod.V2_FIXES:   # revert the fixes in place, like an old device
+            self.assertIn(new, text)
+            text = text.replace(new, old, 1)
+        path.write_text(text)
+        result = self.run_patch(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fix", result.stdout)
+        fixed = path.read_text()
+        for old, new in mod.V2_FIXES:
+            self.assertIn(new, fixed)
+            self.assertNotIn(old, fixed)
+        self.assertEqual(self.run_patch(root).stdout.strip(), "netease music API: already")
 
 
 class TestMusicHandlers(unittest.TestCase):
@@ -310,6 +333,18 @@ class TestMusicHandlersV2(unittest.TestCase):
         self.assertEqual(out["status"], 400)
         out = asyncio.run(handler.handle_kiosk_netease_music_play_queue(FakeRequest({"tracks": [{"id": "x", "name": "a"}]})))
         self.assertEqual(out["status"], 400)
+    def test_play_queue_accepts_a_full_playlist_body(self):
+        # A 50-track list is tens of KB; the shared 1 KB body cap used to reject it (413).
+        h, handler = self.harness()
+        calls = []
+        h.player.play_queue = lambda tracks, start: calls.append((len(tracks), start))
+        tracks = [{"id": i + 1, "name": "歌曲名称" * 8, "artists": ["歌手" * 4],
+                   "album": "专辑" * 10, "duration_ms": 200000,
+                   "cover": "https://p3.music.126.net/" + "x" * 80} for i in range(50)]
+        self.assertGreater(len(json.dumps({"tracks": tracks, "start": 0})), 1024)
+        out = asyncio.run(handler.handle_kiosk_netease_music_play_queue(FakeRequest({"tracks": tracks, "start": 3})))
+        self.assertTrue(out["json"]["ok"])
+        self.assertEqual(calls, [(50, 3)])
 
     def test_queue_view(self):
         h, handler = self.harness()
@@ -337,6 +372,20 @@ class TestMusicHandlersV2(unittest.TestCase):
             out = asyncio.run(handler.handle_kiosk_netease_music_playlists(FakeRequest()))
         self.assertEqual(out["json"]["items"][0]["name"], "我喜欢")
         self.assertEqual(out["json"]["items"][0]["count"], 9)
+
+
+    def test_play_queue_surfaces_risk_control(self):
+        from plugins_func.netease import eapi
+        h, handler = self.harness()
+
+        def boom(tracks, start):
+            raise eapi.NeteaseError(-460)
+
+        h.player.play_queue = boom
+        body = {"tracks": [{"id": 1, "name": "a", "artists": []}], "start": 0}
+        out = asyncio.run(handler.handle_kiosk_netease_music_play_queue(FakeRequest(body)))
+        self.assertEqual(out["status"], 502)
+        self.assertIn("风险", out["error"])
 
 
 if __name__ == "__main__":

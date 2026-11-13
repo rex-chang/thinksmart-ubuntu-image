@@ -92,11 +92,11 @@ METHODS = '''    # NETEASE_MUSIC_API_PATCH_V1
             merged.append({"time": t, "text": text[:160]})
         return merged[:limit]
 
-    async def _netease_music_body(self, request, allowed=()):
+    async def _netease_music_body(self, request, allowed=(), max_bytes=1024):
         if request.content_type != "application/json":
             raise web.HTTPUnsupportedMediaType(text="需要 application/json")
-        raw = await request.content.read(1025)
-        if len(raw) > 1024:
+        raw = await request.content.read(max_bytes + 1)
+        if len(raw) > max_bytes:
             return None, self._error("请求太大", 413)
         try:
             body = json.loads(raw)
@@ -292,7 +292,7 @@ METHODS2 = '''    # NETEASE_MUSIC_API_PATCH_V2
     async def handle_kiosk_netease_music_play_queue(self, request: web.Request):
         if not self._from_this_machine(request):
             return self._error("仅限本机", 403)
-        body, error = await self._netease_music_body(request, ("tracks", "start"))
+        body, error = await self._netease_music_body(request, ("tracks", "start"), max_bytes=262144)
         if error:
             return error
         from plugins_func.netease.api import Track
@@ -314,7 +314,15 @@ METHODS2 = '''    # NETEASE_MUSIC_API_PATCH_V2
         except (TypeError, ValueError):
             start = 0
         player = self._netease_music_player()
-        await self._blocking(player.play_queue, tracks, start)
+        try:
+            await self._blocking(player.play_queue, tracks, start)
+        except Exception as exc:
+            from plugins_func.netease import eapi
+            if isinstance(exc, eapi.NeteaseError):
+                msg = ("网易云检测到当前网络环境存在风险，暂时无法播放，请稍后再试"
+                       if exc.code == -460 else f"网易云接口出错了（{exc.code}），请稍后再试")
+                return self._error(msg, 502)
+            return self._error(f"播放失败：{type(exc).__name__}: {exc}"[:300], 500)
         return self._json({"ok": True, "count": len(tracks)})
 
     async def handle_kiosk_netease_music_play_index(self, request: web.Request):
@@ -326,7 +334,15 @@ METHODS2 = '''    # NETEASE_MUSIC_API_PATCH_V2
         if type(body.get("index")) is not int or body["index"] < 0:
             return self._error("index 格式错误", 400)
         player = self._netease_music_player()
-        ok = await self._blocking(player.play_at, body["index"])
+        try:
+            ok = await self._blocking(player.play_at, body["index"])
+        except Exception as exc:
+            from plugins_func.netease import eapi
+            if isinstance(exc, eapi.NeteaseError):
+                msg = ("网易云检测到当前网络环境存在风险，暂时无法播放，请稍后再试"
+                       if exc.code == -460 else f"网易云接口出错了（{exc.code}），请稍后再试")
+                return self._error(msg, 502)
+            return self._error(f"播放失败：{type(exc).__name__}: {exc}"[:300], 500)
         return self._json({"ok": bool(ok)})
 
     async def handle_kiosk_netease_music_like(self, request: web.Request):
@@ -360,6 +376,24 @@ def _once(text: str, anchor: str, replacement: str, label: str) -> str:
     return text.replace(anchor, replacement, 1)
 
 
+# Targeted fixes for devices that already have V2 (a fresh V2 block above already contains
+# them). Each replaces its old text once; a second run finds nothing and is a no-op.
+V2_FIXES = [
+    # play_queue carries whole playlists (tens of KB) — the 1 KB login-style cap rejected them.
+    ("    async def _netease_music_body(self, request, allowed=()):",
+     "    async def _netease_music_body(self, request, allowed=(), max_bytes=1024):"),
+    ("        raw = await request.content.read(1025)\n        if len(raw) > 1024:",
+     "        raw = await request.content.read(max_bytes + 1)\n        if len(raw) > max_bytes:"),
+    ('        body, error = await self._netease_music_body(request, ("tracks", "start"))',
+     '        body, error = await self._netease_music_body(request, ("tracks", "start"), max_bytes=262144)'),
+    # Surface NetEase risk-control (-460) as a friendly message instead of a bare 500.
+    ("        player = self._netease_music_player()\n        await self._blocking(player.play_queue, tracks, start)\n        return self._json({\"ok\": True, \"count\": len(tracks)})",
+     "        player = self._netease_music_player()\n        try:\n            await self._blocking(player.play_queue, tracks, start)\n        except Exception as exc:\n            from plugins_func.netease import eapi\n            if isinstance(exc, eapi.NeteaseError):\n                msg = (\"网易云检测到当前网络环境存在风险，暂时无法播放，请稍后再试\"\n                       if exc.code == -460 else f\"网易云接口出错了（{exc.code}），请稍后再试\")\n                return self._error(msg, 502)\n            return self._error(f\"播放失败：{type(exc).__name__}: {exc}\"[:300], 500)\n        return self._json({\"ok\": True, \"count\": len(tracks)})"),
+    ("        player = self._netease_music_player()\n        ok = await self._blocking(player.play_at, body[\"index\"])\n        return self._json({\"ok\": bool(ok)})",
+     "        player = self._netease_music_player()\n        try:\n            ok = await self._blocking(player.play_at, body[\"index\"])\n        except Exception as exc:\n            from plugins_func.netease import eapi\n            if isinstance(exc, eapi.NeteaseError):\n                msg = (\"网易云检测到当前网络环境存在风险，暂时无法播放，请稍后再试\"\n                       if exc.code == -460 else f\"网易云接口出错了（{exc.code}），请稍后再试\")\n                return self._error(msg, 502)\n            return self._error(f\"播放失败：{type(exc).__name__}: {exc}\"[:300], 500)\n        return self._json({\"ok\": bool(ok)})"),
+]
+
+
 def apply(root: Path) -> str:
     path = root / "core/admin/admin_handler.py"
     if not path.is_file():
@@ -376,6 +410,11 @@ def apply(root: Path) -> str:
         text = _once(text, ROUTE_ANCHOR, ROUTES2 + ROUTE_ANCHOR, "route2")
         text = _once(text, METHOD_ANCHOR, METHODS2 + METHOD_ANCHOR, "method2")
         changed.append("v2")
+    for old, new in V2_FIXES:
+        if old in text:
+            text = text.replace(old, new, 1)
+            if "fix" not in changed:
+                changed.append("fix")
     if not changed:
         return "already"
     stamp = time.strftime("%Y%m%d-%H%M%S")
