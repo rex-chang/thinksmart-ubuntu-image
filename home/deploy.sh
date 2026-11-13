@@ -49,8 +49,13 @@ echo "==> enabling the home page"
 "${SSH[@]}" "$HOST" "sudo systemctl enable --now thinksmart-home.service && sudo systemctl restart thinksmart-home.service && systemctl is-active thinksmart-home.service"
 
 if [ "$ENABLE_AIRPLAY" = 1 ]; then
-    echo "==> AirPlay (requires the uxplay binary)"
-    "${SSH[@]}" "$HOST" "command -v uxplay >/dev/null || sudo apt-get install -y --no-install-recommends uxplay >/dev/null; \
+    echo "==> AirPlay (uxplay + its GStreamer decoders + avahi publishing)"
+    "${SSH[@]}" "$HOST" "sudo apt-get install -y --no-install-recommends uxplay \
+        gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-plugins-base \
+        gstreamer1.0-plugins-good gstreamer1.0-pulseaudio >/dev/null; \
+        sudo sed -i 's/^disable-publishing=yes/disable-publishing=no/' /etc/avahi/avahi-daemon.conf; \
+        sudo systemctl unmask avahi-daemon.service avahi-daemon.socket >/dev/null 2>&1 || true; \
+        sudo systemctl enable --now avahi-daemon.service; \
         sudo runuser -u ubuntu -- env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user enable --now thinksmart-airplay.service"
 fi
 

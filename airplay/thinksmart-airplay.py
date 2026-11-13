@@ -536,15 +536,23 @@ def start_wayland_watchdog(get_proc, interval: float = 5.0, stop_event: threadin
     threading.Thread(target=_run, daemon=True, name="wayland-watchdog").start()
 
 
+def _uxplay_supports(flag: str) -> bool:
+    """The apt uxplay (1.68 in Ubuntu 24.04) lacks the newest flags; pass only what it knows."""
+    try:
+        out = subprocess.run([UXPLAY_BIN, "-h"], capture_output=True, text=True, timeout=10).stdout
+        return flag in out
+    except Exception:
+        return False
+
+
 def build_cmd() -> list[str]:
     mac = get_deterministic_mac()
-    return [
+    cmd = [
         "/usr/bin/stdbuf", "-oL", "-eL",
         UXPLAY_BIN,
         "-n", "ThinkSmart",
         "-nh",
         "-m", mac,
-        "-srgb", "no",
         "-s", "1280x1280@60",
         "-fps", "30",
         "-vsync", "40",
@@ -561,9 +569,13 @@ def build_cmd() -> list[str]:
         "-as", "pulsesink",
         "-taper",
         "-nohold",
-        "-nofreeze",
         "-reset", "9",
     ]
+    if _uxplay_supports("-srgb"):
+        cmd += ["-srgb", "no"]
+    if _uxplay_supports("-nofreeze"):
+        cmd += ["-nofreeze"]
+    return cmd
 
 
 def stop_proc(proc: subprocess.Popen) -> None:
