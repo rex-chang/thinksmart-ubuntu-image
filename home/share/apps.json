@@ -13,6 +13,17 @@
       }
     },
     {
+      "id": "music",
+      "group": "app",
+      "title": "音乐",
+      "icon": "music",
+      "color": "#f26d6d",
+      "action": {
+        "type": "navigate",
+        "url": "http://127.0.0.1:8091/"
+      }
+    },
+    {
       "id": "focus",
       "group": "app",
       "title": "计时",

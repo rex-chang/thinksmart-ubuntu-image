@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280, initial-scale=1">
+<title>网易云音乐 · ThinkSmart</title>
+<style>
+:root{
+  --bg:#0d1420;--card:#16202f;--card2:#1b2839;--line:#2a3a50;--t1:#eef3fb;--t2:#9db1ca;--t3:#5f7188;
+  --ac:#f26d6d;--ac-soft:#f26d6d22;--good:#3ddc97;--shadow:0 10px 26px #0006;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--t1);
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans CJK SC","PingFang SC",sans-serif}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-action:manipulation}
+button:active{transform:scale(.96)}
+input{font:inherit}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:#2c3e55;border-radius:3px}
+.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+body{display:grid;grid-template-columns:128px 392px 1fr;height:100%}
+
+/* ---- left rail ---- */
+.rail{display:flex;flex-direction:column;gap:6px;padding:16px 10px;background:#0b111b;border-right:1px solid var(--line)}
+.rail button{display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 4px;border-radius:14px;
+  color:var(--t2);font-size:15px;font-weight:600;position:relative}
+.rail button.active{background:var(--ac-soft);color:var(--ac)}
+.rail button.home-btn{color:#9fc4ff;margin-bottom:8px}
+.rail .rail-spacer{flex:1}
+.rail-clock{text-align:center;color:var(--t1);font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;padding:8px 0}
+.rail-acc{display:flex;flex-direction:column;align-items:center;gap:7px;color:var(--t2);font-size:13px;padding:10px 2px}
+.rail-ava{width:40px;height:40px;border-radius:50%;background:#24344c;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.rail-ava img{width:100%;height:100%;object-fit:cover}
+.tab-badge{position:absolute;top:8px;right:14px;background:#2c3e55;color:#cfe0f5;font-size:11px;font-weight:700;
+  border-radius:9px;padding:1px 6px;min-width:18px}
+
+/* ---- now playing ---- */
+.np{position:relative;display:flex;flex-direction:column;padding:26px 24px 20px;background:var(--card);
+  border-right:1px solid var(--line);overflow:hidden}
+.np-bg{position:absolute;inset:-30px;background-size:cover;background-position:center;filter:blur(38px) brightness(.32);opacity:.6;pointer-events:none}
+.np>*{position:relative}
+.np-head{text-align:center}
+.disc{width:216px;height:216px;margin:6px auto 18px;border-radius:50%;position:relative;
+  background:radial-gradient(circle,#1a1a1a 34%,#262626 35%,#151515 62%,#2a2a2a 63%,#181818 66%);
+  box-shadow:0 14px 34px #0009, inset 0 0 0 1px #ffffff14;display:flex;align-items:center;justify-content:center}
+.disc img{width:128px;height:128px;border-radius:50%;object-fit:cover}
+.disc.playing{animation:spin 22s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.song-name{font-size:25px;font-weight:800;line-height:1.3;max-height:66px;overflow:hidden;word-break:break-all}
+.song-artist{color:var(--t2);font-size:16px;margin-top:6px;min-height:22px}
+.np-tags{display:flex;gap:8px;justify-content:center;margin-top:8px;min-height:22px}
+.np-tags span{font-size:12px;font-weight:700;border-radius:8px;padding:2px 9px;background:var(--card2);color:var(--t2)}
+.np-tags .st-on{color:var(--good)}
+.prog{margin-top:18px}
+.prog-bar{position:relative;height:26px;display:flex;align-items:center;cursor:pointer;touch-action:none}
+.prog-track{height:5px;width:100%;background:#2b3c53;border-radius:3px;overflow:hidden}
+.prog-fill{height:100%;width:0;background:var(--ac);border-radius:3px}
+.prog-thumb{position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 6px #0008;
+  left:0;transform:translateX(-50%);pointer-events:none}
+.prog-times{display:flex;justify-content:space-between;color:var(--t3);font-size:13px;font-variant-numeric:tabular-nums;margin-top:2px}
+.transport{display:flex;align-items:center;justify-content:center;gap:20px;margin-top:12px}
+.transport button{display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:50%;color:var(--t1)}
+.transport .t-play{width:64px;height:64px;background:var(--ac);color:#fff;box-shadow:0 6px 18px #f26d6d44}
+.transport .t-play .i{width:28px;height:28px}
+.transport .t-sm{width:44px;height:44px;color:var(--t2)}
+.transport .t-sm.on{color:var(--ac)}
+.vol-row{display:flex;align-items:center;gap:10px;margin-top:10px;color:var(--t3)}
+.vol-row .i{width:18px;height:18px}
+.vol-row input{flex:1;accent-color:var(--ac);height:22px}
+.lyr{flex:1;min-height:0;margin-top:16px;overflow:hidden;mask-image:linear-gradient(#0000,#000 12%,#000 88%,#0000);
+  display:flex;flex-direction:column;justify-content:center;gap:12px;text-align:center}
+.lyr div{color:var(--t2);font-size:16px;line-height:1.5;max-height:48px;overflow:hidden}
+.lyr div.now{color:var(--t1);font-weight:700;font-size:18px}
+.lyr .ph{color:var(--t3)}
+
+/* ---- right pane ---- */
+.right{display:flex;flex-direction:column;min-width:0;padding:20px 22px 0}
+.page-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.page-title{font-size:27px;font-weight:800}
+.page-hd .sub{color:var(--t3);font-size:14px}
+.chips{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.chip{padding:10px 18px;border-radius:14px;background:var(--card);color:var(--t2);font-size:15px;font-weight:600;
+  display:flex;align-items:center;gap:8px;border:1px solid transparent}
+.chip img{width:26px;height:26px;border-radius:7px;object-fit:cover}
+.chip.active{background:var(--ac-soft);color:var(--ac);border-color:#f26d6d55}
+.sec-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0 10px}
+.sec-bar b{font-size:18px}
+.sec-bar .acts{display:flex;gap:8px}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:12px;background:var(--card2);
+  color:var(--t1);font-size:14px;font-weight:600;border:1px solid var(--line)}
+.btn .i{width:17px;height:17px}
+.btn.primary{background:var(--ac);color:#fff;border-color:transparent}
+.btn.ghost{background:transparent;color:var(--t2)}
+.list{flex:1;min-height:0;overflow-y:auto;padding-bottom:18px}
+.song{display:grid;grid-template-columns:44px 1fr 120px 64px;gap:12px;align-items:center;
+  padding:10px 12px;border-radius:12px;cursor:pointer}
+.song:nth-child(odd){background:#ffffff04}
+.song.playing{background:var(--ac-soft)}
+.song .cov{width:44px;height:44px;border-radius:9px;object-fit:cover;background:#223047}
+.song .nm{font-size:16px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.song .ar{font-size:13px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.song .al{font-size:13px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.song .du{font-size:13px;color:var(--t3);text-align:right;font-variant-numeric:tabular-nums}
+.song.playing .nm{color:var(--ac)}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--t2);text-align:center}
+.empty .big{width:74px;height:74px;border-radius:22px;background:var(--card);display:flex;align-items:center;justify-content:center}
+.empty .big .i{width:36px;height:36px;color:var(--t3)}
+.empty p{font-size:15px;line-height:1.8;color:var(--t3)}
+.tab-view{display:none;flex-direction:column;flex:1;min-height:0}
+.tab-view.active{display:flex}
+
+/* search */
+.search-row{display:flex;gap:10px;margin-bottom:12px}
+.search-row input{flex:1;height:52px;border-radius:14px;border:1px solid var(--line);background:var(--card);
+  color:var(--t1);font-size:19px;padding:0 18px;outline:none}
+.search-row input:focus{border-color:var(--ac)}
+.search-row .btn.primary{height:52px;font-size:18px;padding:0 26px}
+
+/* account */
+.acc-card{margin:auto;max-width:560px;width:100%;background:var(--card);border:1px solid var(--line);
+  border-radius:22px;padding:30px;display:flex;flex-direction:column;align-items:center;gap:14px;box-shadow:var(--shadow)}
+.acc-card .ava{width:88px;height:88px;border-radius:50%;object-fit:cover;background:#223047}
+.acc-card h2{font-size:24px}
+.acc-card .uid{color:var(--t3);font-size:14px}
+.qr{width:230px;height:230px;border-radius:14px;background:#fff;padding:10px}
+.qr img{width:100%;height:100%;image-rendering:pixelated}
+.acc-tip{color:var(--t2);font-size:15px;text-align:center;line-height:1.7}
+.toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%);background:#223048f0;color:var(--t1);
+  padding:13px 26px;border-radius:14px;font-size:16px;font-weight:600;box-shadow:var(--shadow);opacity:0;
+  pointer-events:none;transition:opacity .18s;z-index:50}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg"><defs>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 11 12 4l8.5 7M5.5 9.5V20h13V9.5M10 20v-5.5h4V20"/></symbol>
+<symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.6-9.3-9C1.3 7.2 3.6 4 6.7 4c2 0 3.8 1.2 5.3 3 1.5-1.8 3.3-3 5.3-3 3.1 0 5.4 3.2 4 7-1.8 4.4-9.3 9-9.3 9z"/></symbol>
+<symbol id="i-queue" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h10M17 15l4 3-4 3v-6z"/></symbol>
+<symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4.5"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-next" viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 2l3 3-3 3M3 11V9a4 4 0 014-4h13M7 22l-3-3 3-3M21 13v2a4 4 0 01-4 4H4"/></symbol>
+<symbol id="i-repeat1" viewBox="0 0 24 24"><path d="M17 2l3 3-3 3M3 11V9a4 4 0 014-4h13M7 22l-3-3 3-3M21 13v2a4 4 0 01-4 4H4"/><text x="12" y="15" font-size="9" fill="currentColor" stroke="none" text-anchor="middle" font-weight="700">1</text></symbol>
+<symbol id="i-vol" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5zM15 9a5 5 0 010 6M18 6a9 9 0 010 12"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 10-2.5 5.8M20 4v5h-5"/></symbol>
+<symbol id="i-qr" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h3v3h-3zM20 14v6h-6"/></symbol>
+<symbol id="i-out" viewBox="0 0 24 24"><path d="M15 4h4a1 1 0 011 1v14a1 1 0 01-1 1h-4M10 17l5-5-5-5M15 12H3"/></symbol>
+</defs></svg>
+
+<nav class="rail">
+  <button class="home-btn" id="btnHome"><svg class="i"><use href="#i-home"/></svg>主页</button>
+  <button class="tab-btn active" data-tab="mine"><svg class="i"><use href="#i-heart"/></svg>我的</button>
+  <button class="tab-btn" data-tab="queue"><svg class="i"><use href="#i-queue"/></svg>播放队列<span class="tab-badge" id="qCount" style="display:none"></span></button>
+  <button class="tab-btn" data-tab="top"><svg class="i"><use href="#i-chart"/></svg>排行榜</button>
+  <button class="tab-btn" data-tab="search"><svg class="i"><use href="#i-search"/></svg>搜索</button>
+  <div class="rail-spacer"></div>
+  <div class="rail-clock" id="clock">--:--</div>
+  <button class="rail-acc" data-tab="account">
+    <span class="rail-ava"><img id="accAva" style="display:none" alt=""><svg class="i" id="accAvaIco"><use href="#i-user"/></svg></span>
+    <span id="accLbl">账号</span>
+  </button>
+</nav>
+
+<aside class="np">
+  <div class="np-bg" id="npBg"></div>
+  <div class="np-head">
+    <div class="disc" id="disc"><img id="cover" alt="" style="display:none"></div>
+    <div class="song-name" id="npTitle">未在播放</div>
+    <div class="song-artist" id="npArtist">点右边任意一首歌开始播放</div>
+    <div class="np-tags"><span id="npState">待播放</span><span>网易云音乐</span></div>
+  </div>
+  <div class="prog">
+    <div class="prog-bar" id="progBar"><div class="prog-track"><div class="prog-fill" id="progFill"></div></div><div class="prog-thumb" id="progThumb"></div></div>
+    <div class="prog-times"><span id="tNow">0:00</span><span id="tAll">0:00</span></div>
+  </div>
+  <div class="transport">
+    <button class="t-sm" id="btnMode" title="播放模式"><svg class="i"><use href="#i-repeat"/></svg></button>
+    <button id="btnPrev"><svg class="i"><use href="#i-prev"/></svg></button>
+    <button class="t-play" id="btnPlay"><svg class="i"><use href="#i-play"/></svg></button>
+    <button id="btnNext"><svg class="i"><use href="#i-next"/></svg></button>
+    <button class="t-sm" id="btnLike" title="喜欢"><svg class="i"><use href="#i-heart"/></svg></button>
+  </div>
+  <div class="vol-row"><svg class="i"><use href="#i-vol"/></svg><input type="range" id="vol" min="0" max="100" value="70" aria-label="音量"></div>
+  <div class="lyr" id="lyr"><div class="ph">也可以直接喊“小麦小麦”点歌</div></div>
+</aside>
+
+<main class="right">
+  <div class="page-hd"><div class="page-title" id="pageTitle">我的音乐</div><span class="sub" id="pageSub"></span></div>
+
+  <section class="tab-view active" id="view-mine">
+    <div class="chips" id="plChips"></div>
+    <div class="sec-bar"><b id="mineTitle">歌单</b>
+      <div class="acts">
+        <button class="btn ghost" id="mineRefresh"><svg class="i"><use href="#i-refresh"/></svg>刷新</button>
+        <button class="btn primary" id="minePlayAll"><svg class="i"><use href="#i-play"/></svg>播放全部</button>
+      </div>
+    </div>
+    <div class="list" id="mineList"></div>
+    <div class="empty" id="mineEmpty" style="display:none">
+      <div class="big"><svg class="i"><use href="#i-qr"/></svg></div>
+      <h3>还没登录网易云账号</h3>
+      <p>点左下角「账号」扫码登录，<br>就能同步「我喜欢」和个人歌单</p>
+      <button class="btn primary" id="mineGoLogin">去扫码登录</button>
+    </div>
+  </section>
+
+  <section class="tab-view" id="view-queue">
+    <div class="sec-bar"><b>当前队列</b><span class="sub" id="queueMeta"></span></div>
+    <div class="list" id="queueList"></div>
+  </section>
+
+  <section class="tab-view" id="view-top">
+    <div class="chips" id="topChips"></div>
+    <div class="sec-bar"><b id="topTitle">排行榜</b>
+      <div class="acts"><button class="btn primary" id="topPlayAll"><svg class="i"><use href="#i-play"/></svg>播放全部</button></div>
+    </div>
+    <div class="list" id="topList"></div>
+  </section>
+
+  <section class="tab-view" id="view-search">
+    <div class="search-row">
+      <input id="searchInput" placeholder="歌名 / 歌手 / 专辑" autocomplete="off">
+      <button class="btn primary" id="searchGo"><svg class="i"><use href="#i-search"/></svg>搜索</button>
+    </div>
+    <div class="list" id="searchList"></div>
+  </section>
+
+  <section class="tab-view" id="view-account">
+    <div class="acc-card" id="accCard"></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = s => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+let st = null, lyrics = [], lyricMid = '', tab = 'mine';
+let myLists = [], myTracks = [], myPid = null, myTitle = '';
+let topTracks = [], topId = 3778678;
+let searchTracks = [];
+let ticking = 0, lastPollAt = 0, loginPoll = 0;
+const BOARDS = [
+  {id: 19723756, name: '飙升榜'}, {id: 3778678, name: '热歌榜'},
+  {id: 3779629, name: '新歌榜'}, {id: 2884035, name: '原创榜'},
+];
+
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
+async function api(path, body){
+  const opt = body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)};
+  const r = await fetch('/api/' + path, opt);
+  const d = await r.json().catch(()=>null);
+  if (!r.ok) throw new Error((d && (d.message || d.error)) || ('HTTP '+r.status));
+  return d;
+}
+function goHome(){ try{ parent.postMessage({ts:'sub',cmd:'close'}, 'http://127.0.0.1:8090'); }catch(e){} }
+$('btnHome').onclick = goHome;
+
+function switchTab(t){
+  tab = t;
+  document.querySelectorAll('.tab-btn,.rail-acc').forEach(b=>b.classList.toggle('active', b.dataset.tab===t));
+  document.querySelectorAll('.tab-view').forEach(v=>v.classList.toggle('active', v.id==='view-'+t));
+  $('pageTitle').textContent = {mine:'我的音乐',queue:'播放队列',top:'排行榜',search:'搜索',account:'账号'}[t];
+  $('pageSub').textContent = '';
+  if (t==='queue') loadQueue();
+  if (t==='top' && !topTracks.length) loadTop(topId);
+  if (t==='account') renderAccount();
+  if (t==='search') setTimeout(()=>$('searchInput').focus(), 100);
+}
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+$('mineGoLogin').onclick = ()=>switchTab('account');
+
+/* ---------- now playing ---------- */
+function renderNp(){
+  const m = st && st.music;
+  const tr = m && m.track;
+  $('npTitle').textContent = tr ? tr.title : '未在播放';
+  $('npArtist').textContent = tr ? tr.artist : '点右边任意一首歌开始播放';
+  $('npState').textContent = tr ? (m.paused ? '已暂停' : '播放中') : '待播放';
+  $('npState').className = tr && !m.paused ? 'st-on' : '';
+  $('disc').classList.toggle('playing', !!(m && m.playing && !m.paused));
+  if (tr && tr.cover){
+    $('cover').src = tr.cover + '?param=256y256'; $('cover').style.display='block';
+    $('npBg').style.backgroundImage = `url("${tr.cover}?param=400y400")`;
+  } else { $('cover').style.display='none'; $('npBg').style.backgroundImage=''; }
+  $('btnPlay').innerHTML = `<svg class="i"><use href="#i-${m && m.playing && !m.paused ? 'pause':'play'}"/></svg>`;
+  const one = m && m.play_mode === 'single';
+  $('btnMode').innerHTML = `<svg class="i"><use href="#i-${one?'repeat1':'repeat'}"/></svg>`;
+  $('btnMode').classList.toggle('on', !!one);
+  const q = m && m.queue_count;
+  $('qCount').style.display = q ? '' : 'none';
+  if (q) $('qCount').textContent = q;
+}
+function liveElapsed(){ return st && st.music ? st.music.elapsed + (st.music.playing && !st.music.paused ? (Date.now()-lastPollAt)/1000 : 0) : 0; }
+function tick(){
+  const m = st && st.music;
+  const dur = m ? m.duration : 0, el = Math.min(liveElapsed(), dur || 0);
+  $('tNow').textContent = fmt(el); $('tAll').textContent = fmt(dur);
+  const pct = dur ? Math.min(100, el/dur*100) : 0;
+  $('progFill').style.width = pct+'%'; $('progThumb').style.left = pct+'%';
+  renderLyric(el);
+}
+function renderLyric(el){
+  const box = $('lyr');
+  if (!lyrics.length){ if (!box.dataset.ph){ box.innerHTML='<div class="ph">纯音乐 / 暂无歌词</div>'; box.dataset.ph=1; } return; }
+  delete box.dataset.ph;
+  let cur = 0;
+  for (let i=0;i<lyrics.length;i++){ if (lyrics[i][0] <= el+0.3) cur = i; else break; }
+  if (box.dataset.cur === String(cur)) return;
+  box.dataset.cur = cur;
+  const rows = [cur-1, cur, cur+1].filter(i=>i>=0 && i<lyrics.length);
+  box.innerHTML = rows.map(i=>`<div class="${i===cur?'now':''}">${esc(lyrics[i][1])}</div>`).join('');
+}
+async function loadLyrics(mid){
+  if (!mid || mid === lyricMid) return;
+  lyricMid = mid;
+  try{ const d = await api('music/lyrics'); lyrics = (d.lyrics||[]); $('lyr').dataset.cur=''; }
+  catch(e){ lyrics = []; }
+}
+async function poll(){
+  try{
+    const s = await api('music/status');
+    const prevMid = st && st.music && st.music.track && st.music.track.mid;
+    st = { music: s }; lastPollAt = Date.now();
+    renderNp(); tick();
+    const mid = s.track && s.track.mid;
+    if (mid !== prevMid) { lyrics = []; $('lyr').dataset.cur=''; loadLyrics(mid); if (tab==='queue') loadQueue(); }
+  }catch(e){ /* hub restarting: keep last frame */ }
+  setTimeout(poll, 2000);
+}
+setInterval(tick, 1000);
+$('btnPlay').onclick = ()=>api('music/control',{action:'toggle'}).then(poll).catch(e=>toast(e.message||'现在没有在播放'));
+$('btnPrev').onclick = ()=>api('music/control',{action:'prev'}).then(poll).catch(e=>toast(e.message));
+$('btnNext').onclick = ()=>api('music/control',{action:'next'}).then(poll).catch(e=>toast(e.message));
+$('btnMode').onclick = ()=>api('music/control',{action:'mode'}).then(d=>{ if(d.play_mode==='single')toast('单曲循环'); else toast('列表循环'); poll(); }).catch(e=>toast(e.message));
+$('btnLike').onclick = async ()=>{
+  const tr = st && st.music && st.music.track;
+  if (!tr) return toast('还没有在播放');
+  try{ await api('music/like',{id:Number(tr.mid), like:true}); toast('已加入我喜欢'); }catch(e){ toast(e.message); }
+};
+$('vol').onchange = e=>api('music/volume',{volume:Number(e.target.value)}).catch(()=>{});
+$('vol').oninput = e=>{ /* live preview only on release */ };
+
+/* progress scrub: tap or drag */
+(()=>{
+  const bar = $('progBar');
+  const seekAt = ev=>{
+    const r = bar.getBoundingClientRect();
+    const x = (ev.clientX ?? (ev.touches && ev.touches[0].clientX)) - r.left;
+    const dur = st && st.music ? st.music.duration : 0;
+    if (!dur) return;
+    const sec = Math.max(0, Math.min(dur, x/r.width*dur));
+    api('music/seek',{sec:Math.round(sec)}).then(poll).catch(e=>toast(e.message));
+  };
+  bar.addEventListener('click', seekAt);
+})();
+
+/* ---------- song lists ---------- */
+function songRow(t, i, playing){
+  const arts = (t.artists||[]).join(' / ');
+  return `<div class="song ${playing?'playing':''}" data-i="${i}">
+    <img class="cov" loading="lazy" src="${esc(t.cover ? t.cover+'?param=88y88' : '')}" onerror="this.style.visibility='hidden'">
+    <div style="min-width:0"><div class="nm">${esc(t.name)}</div><div class="ar">${esc(arts)}</div></div>
+    <div class="al">${esc(t.album||'')}</div><div class="du">${fmt((t.duration_ms||0)/1000)}</div></div>`;
+}
+function bindList(el, list, onplay){
+  el.querySelectorAll('.song').forEach(row=>row.onclick=()=>onplay(list, Number(row.dataset.i)));
+}
+async function playList(list, i){
+  try{ await api('music/play_queue',{tracks:list, start:i}); toast(`开始播放《${list[i].name}》`); poll(); }
+  catch(e){ toast(e.message||'播放失败'); }
+}
+
+/* ---------- mine ---------- */
+async function loadMine(){
+  $('mineRefresh').disabled = true;
+  try{
+    const d = await api('music/playlists');
+    myLists = d.items || [];
+    if (!myLists.length){ $('mineEmpty').style.display='flex'; $('plChips').innerHTML=''; $('mineList').innerHTML=''; return; }
+    $('mineEmpty').style.display='none';
+    $('plChips').innerHTML = myLists.slice(0,12).map(p=>
+      `<button class="chip ${p.id===myPid?'active':''}" data-pid="${p.id}"><img src="${esc(p.cover)}?param=52y52" onerror="this.style.visibility='hidden'">${esc(p.name)}</button>`).join('');
+    $('plChips').querySelectorAll('.chip').forEach(c=>c.onclick=()=>loadPlaylist(Number(c.dataset.pid), c.textContent.trim()));
+    if (myPid === null) await loadPlaylist(myLists[0].id, myLists[0].name);
+  }catch(e){
+    $('plChips').innerHTML=''; $('mineList').innerHTML='';
+    $('mineEmpty').style.display='flex';
+    $('mineEmpty').querySelector('h3').textContent = e.message==='还没有登录网易云' ? '还没登录网易云账号' : '歌单加载失败';
+  }finally{ $('mineRefresh').disabled = false; }
+}
+async function loadPlaylist(pid, name){
+  myPid = pid; myTitle = name;
+  $('mineTitle').textContent = name;
+  $('plChips').querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', Number(c.dataset.pid)===pid));
+  $('mineList').innerHTML = '<div class="empty"><p>加载中…</p></div>';
+  try{
+    const d = await api('music/playlist_tracks?id='+pid);
+    myTracks = d.items || [];
+    const mid = st && st.music && st.music.track && st.music.track.mid;
+    $('mineList').innerHTML = myTracks.map((t,i)=>songRow(t,i,String(t.id)===String(mid))).join('') || '<div class="empty"><p>这个歌单是空的</p></div>';
+    bindList($('mineList'), myTracks, playList);
+  }catch(e){ $('mineList').innerHTML = `<div class="empty"><p>${esc(e.message)}</p></div>`; }
+}
+$('mineRefresh').onclick = ()=>{ myPid=null; loadMine(); };
+$('minePlayAll').onclick = ()=>{ if (myTracks.length) playList(myTracks, 0); };
+
+/* ---------- queue ---------- */
+async function loadQueue(){
+  try{
+    const d = await api('music/queue');
+    const items = d.items || [];
+    $('queueMeta').textContent = items.length ? `${items.length} 首` : '';
+    const mid = st && st.music && st.music.track && st.music.track.mid;
+    $('queueList').innerHTML = items.map((t,i)=>songRow(t,i,i===d.index)).join('') ||
+      '<div class="empty"><p>队列是空的，去搜索或歌单里挑几首吧</p></div>';
+    $('queueList').querySelectorAll('.song').forEach(row=>row.onclick=async()=>{
+      try{ await api('music/play_index',{index:Number(row.dataset.i)}); poll(); loadQueue(); }
+      catch(e){ toast(e.message); }
+    });
+  }catch(e){ $('queueList').innerHTML = `<div class="empty"><p>${esc(e.message)}</p></div>`; }
+}
+
+/* ---------- toplist ---------- */
+async function loadTop(id){
+  topId = id;
+  const b = BOARDS.find(x=>x.id===id);
+  $('topTitle').textContent = b ? b.name : '排行榜';
+  $('topChips').querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', Number(c.dataset.bid)===id));
+  $('topList').innerHTML = '<div class="empty"><p>加载中…</p></div>';
+  try{
+    const d = await api('music/playlist_tracks?id='+id);
+    topTracks = (d.items||[]).slice(0,50);
+    $('topList').innerHTML = topTracks.map((t,i)=>songRow(t,i,false)).join('');
+    bindList($('topList'), topTracks, playList);
+  }catch(e){ $('topList').innerHTML = `<div class="empty"><p>${esc(e.message)}</p></div>`; }
+}
+$('topChips').innerHTML = BOARDS.map(b=>`<button class="chip ${b.id===topId?'active':''}" data-bid="${b.id}">${b.name}</button>`).join('');
+$('topChips').querySelectorAll('.chip').forEach(c=>c.onclick=()=>loadTop(Number(c.dataset.bid)));
+$('topPlayAll').onclick = ()=>{ if (topTracks.length) playList(topTracks, 0); };
+
+/* ---------- search ---------- */
+async function doSearch(){
+  const q = $('searchInput').value.trim();
+  if (!q) return;
+  $('searchList').innerHTML = '<div class="empty"><p>搜索中…</p></div>';
+  try{
+    const d = await api('music/search?q='+encodeURIComponent(q));
+    searchTracks = d.items || [];
+    $('searchList').innerHTML = searchTracks.map((t,i)=>songRow(t,i,false)).join('') ||
+      '<div class="empty"><p>没有找到相关歌曲</p></div>';
+    bindList($('searchList'), searchTracks, playList);
+  }catch(e){ $('searchList').innerHTML = `<div class="empty"><p>${esc(e.message)}</p></div>`; }
+}
+$('searchGo').onclick = doSearch;
+$('searchInput').addEventListener('keydown', e=>{ if (e.key==='Enter') doSearch(); });
+
+/* ---------- account / QR login ---------- */
+async function loginStatus(){ const d = await api('login/status'); return d; }
+async function renderAccount(){
+  const card = $('accCard');
+  card.innerHTML = '<p class="acc-tip">读取中…</p>';
+  try{
+    const d = await loginStatus();
+    const acc = d.account || {}, task = d.task || {};
+    $('accLbl').textContent = acc.logged_in ? (acc.nickname || '已登录') : '账号';
+    if (acc.logged_in){
+      card.innerHTML = `<div class="ava" id="accBigAva"></div><h2>${esc(acc.nickname||'网易云用户')}</h2>
+        <span class="uid">UID ${esc(acc.uid||'')}</span>
+        <p class="acc-tip">已登录，我的音乐、歌单和「我喜欢」都已同步</p>
+        <button class="btn" id="btnLogout"><svg class="i"><use href="#i-out"/></svg>退出登录</button>`;
+      $('btnLogout').onclick = async ()=>{ await api('login/logout',{}); toast('已退出'); myPid=null; myLists=[]; renderAccount(); loadMine(); };
+      return;
+    }
+    if (task.state === 'waiting_scan' || task.state === 'scanned'){
+      card.innerHTML = `<h2>扫码登录</h2>
+        <div class="qr">${task.qr_data_url?`<img src="${task.qr_data_url}">`:''}</div>
+        <p class="acc-tip">${task.state==='scanned'?'已扫码，请在手机上确认登录':'用网易云音乐 App 扫码登录'}</p>
+        <button class="btn ghost" id="btnCancelQr">取消</button>`;
+      $('btnCancelQr').onclick = async ()=>{ await api('login/cancel',{task_id:task.id}); clearInterval(loginPoll); loginPoll=0; renderAccount(); };
+      if (!loginPoll) loginPoll = setInterval(async ()=>{
+        try{ const s = await loginStatus(); const t2 = s.task||{};
+          if ((s.account||{}).logged_in){ clearInterval(loginPoll); loginPoll=0; toast('登录成功'); myPid=null; loadMine(); renderAccount(); }
+          else if (['expired','failed','cancelled'].includes(t2.state)){ clearInterval(loginPoll); loginPoll=0; renderAccount(); }
+        }catch(e){}
+      }, 2000);
+      return;
+    }
+    card.innerHTML = `<div class="big" style="width:74px;height:74px;border-radius:22px;background:var(--card2);display:flex;align-items:center;justify-content:center"><svg class="i" style="width:36px;height:36px;color:var(--t3)"><use href="#i-qr"/></svg></div>
+      <h2>登录网易云音乐</h2>
+      <p class="acc-tip">登录后同步「我喜欢」和个人歌单<br>也可以直接对小麦说「登录网易云」</p>
+      <button class="btn primary" id="btnStartQr"><svg class="i"><use href="#i-qr"/></svg>生成登录二维码</button>`;
+    $('btnStartQr').onclick = async ()=>{
+      try{ await api('login/start',{}); renderAccount(); }
+      catch(e){ toast(e.message||'二维码生成失败'); }
+    };
+  }catch(e){ card.innerHTML = `<p class="acc-tip">${esc(e.message)}</p>`; }
+}
+setInterval(()=>{ const d=new Date(); $('clock').textContent = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }, 1000);
+
+poll();
+loadMine();
+</script>
+</body>
+</html>

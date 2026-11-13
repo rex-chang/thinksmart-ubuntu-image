@@ -58,6 +58,11 @@ home/share/apps.json                  /usr/local/share/thinksmart-home/apps.json
 home/share/display.html               /usr/local/share/thinksmart-home/display.html   644 root system:thinksmart-home.service
 home/share/home_overlay.js            /usr/local/share/thinksmart-home/home_overlay.js 644 root kiosk
 
+# 网易云音乐 App (8091, loopback; the hub music bridge comes from netease/deploy.sh)
+netease/app/thinksmart-music.py       /usr/local/bin/thinksmart-music.py              755 root user:thinksmart-music.service
+netease/app/thinksmart-music.service  /home/ubuntu/.config/systemd/user/thinksmart-music.service 644 ubuntu user:thinksmart-music.service
+netease/app/share/index.html          /usr/local/share/thinksmart-music/index.html    644 root user:thinksmart-music.service
+
 # 可视对讲 (optional: camera + GStreamer; the tunnel needs /etc/thinksmart-intercom keys,
 # enable with home/deploy.sh --intercom)
 intercom/thinksmart-intercom.py       /usr/local/bin/thinksmart-intercom.py           755 root system:thinksmart-intercom.service

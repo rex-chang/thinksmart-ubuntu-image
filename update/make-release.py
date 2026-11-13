@@ -107,7 +107,7 @@ def sha256(path):
 
 
 SYSTEM_DIRS = ['kiosk', 'screen', 'xiaozhi', 'bluetooth', 'zram', 'update', 'home', 'intercom',
-               'airplay', 'usb', 'VERSION',
+               'airplay', 'usb', 'netease/app', 'VERSION',
                'image/system-files.txt', 'image/system-post.sh', 'image/thinksmart-ssh-hostkeys.service']
 
 

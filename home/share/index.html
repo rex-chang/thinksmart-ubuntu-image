@@ -2310,11 +2310,8 @@ function syncSecTimer() {
   if (want) { if (!secTimer) secTimer = setInterval(tickSec, 1000); }
   else if (secTimer) { clearInterval(secTimer); secTimer = 0; }
 }
-const openMusic = () => {
-  if (sleepNow()) { openTimerPage('night'); return; }
-  if (st && st.music && st.music.ambient) { openTimerPage('setup', 'focus'); return; }
-  post({ cmd: 'navigate', url: 'http://127.0.0.1:8091/' });
-};
+// The music card controls NetEase in place; tapping the cover/body opens the music app (:8091).
+const openMusic = () => { post({ cmd: 'navigate', url: 'http://127.0.0.1:8091/' }); };
 $('mArt').onclick = openMusic;
 $('mBody').onclick = e => { if ($('mProg').contains(e.target) || monoNow() < mSeekGuardUntil) return; openMusic(); };
 $('mProg').addEventListener('click', e => e.stopPropagation());
@@ -2479,7 +2476,7 @@ async function musicAct(action) {
   if (action === 'toggle' && mBase) setMusicPlayingUi(!prevPlay);
   try {
     const j = await api('/api/home/music', { action: reqAction });
-    if (j && j.open) {
+    if (j && j.open) {   // nothing playing: open the music app to pick something
       if (prevPlay !== null && action === 'toggle') setMusicPlayingUi(prevPlay);
       openMusic();
       return;

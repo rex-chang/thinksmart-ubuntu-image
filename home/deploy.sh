@@ -32,7 +32,7 @@ SCP=(scp ${SSH_OPTS[@]+"${SSH_OPTS[@]}"})
 
 echo "==> staging the system layer on $HOST"
 "${SSH[@]}" "$HOST" "rm -rf $STAGE && mkdir -p $STAGE"
-"${SCP[@]}" -r "$ROOT/home" "$ROOT/intercom" "$ROOT/airplay" "$ROOT/usb" \
+"${SCP[@]}" -r "$ROOT/home" "$ROOT/intercom" "$ROOT/airplay" "$ROOT/usb" "$ROOT/netease" \
     "$ROOT/kiosk" "$ROOT/screen" "$ROOT/xiaozhi" "$ROOT/bluetooth" "$ROOT/zram" \
     "$ROOT/update" "$ROOT/image" "$ROOT/VERSION" "$HOST:$STAGE/"
 
@@ -47,6 +47,9 @@ echo "==> system-apply (files land per image/system-files.txt; changed units res
 
 echo "==> enabling the home page"
 "${SSH[@]}" "$HOST" "sudo systemctl enable --now thinksmart-home.service && sudo systemctl restart thinksmart-home.service && systemctl is-active thinksmart-home.service"
+
+echo "==> enabling the NetEase music app (:8091)"
+"${SSH[@]}" "$HOST" "sudo runuser -u ubuntu -- env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user enable --now thinksmart-music.service && sudo runuser -u ubuntu -- env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user restart thinksmart-music.service"
 
 if [ "$ENABLE_AIRPLAY" = 1 ]; then
     echo "==> AirPlay (uxplay + its GStreamer decoders + avahi publishing)"
