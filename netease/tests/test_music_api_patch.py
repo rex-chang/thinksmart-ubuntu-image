@@ -256,5 +256,88 @@ class TestLrcParser(unittest.TestCase):
         self.assertEqual(len(rows), 2)
 
 
+class TestMusicHandlersV2(unittest.TestCase):
+    """The search/playlists/play_queue/like/queue endpoints (patch block V2)."""
+
+    @classmethod
+    def setUpClass(cls):
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        path = root / "core/admin/admin_handler.py"
+        path.parent.mkdir(parents=True)
+        path.write_text(HANDLER, encoding="utf-8")
+        result = subprocess.run([sys.executable, str(PATCH), str(root)],
+                                capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        cls.source = path.read_text(encoding="utf-8")
+        assert "NETEASE_MUSIC_API_PATCH_V2" in cls.source
+
+    def harness(self, status=None, queue=None, index=0):
+        h = HandlerHarness(player_status=status)
+        if queue is not None:
+            h.player.queue = queue
+            h.player.index = index
+        h._client_calls = []
+        handler = h.load(self.source)
+        handler._netease_music_client = lambda: object()   # logged-in fake client
+        return h, handler
+
+    def test_search(self):
+        from unittest import mock
+        from plugins_func.netease.api import Track
+        h, handler = self.harness()
+        req = FakeRequest()
+        req.query = {"q": "晴天"}
+        tracks = [Track(id=7, name="晴天", artists=["周杰伦"], album="叶惠美", duration_ms=269000, cover="c")]
+        with mock.patch("plugins_func.netease.api.search_songs", return_value=tracks) as fn:
+            out = asyncio.run(handler.handle_kiosk_netease_music_search(req))
+        payload = out["json"]
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["items"][0]["name"], "晴天")
+        self.assertEqual(payload["items"][0]["artists"], ["周杰伦"])
+        self.assertEqual(fn.call_args[0][1], "晴天")
+
+    def test_play_queue_builds_tracks_and_plays(self):
+        h, handler = self.harness()
+        calls = []
+        h.player.play_queue = lambda tracks, start: calls.append((len(tracks), start))
+        body = {"tracks": [{"id": 1, "name": "a", "artists": ["x"], "duration_ms": 1000}], "start": 0}
+        out = asyncio.run(handler.handle_kiosk_netease_music_play_queue(FakeRequest(body)))
+        self.assertTrue(out["json"]["ok"])
+        self.assertEqual(calls, [(1, 0)])
+        out = asyncio.run(handler.handle_kiosk_netease_music_play_queue(FakeRequest({"tracks": []})))
+        self.assertEqual(out["status"], 400)
+        out = asyncio.run(handler.handle_kiosk_netease_music_play_queue(FakeRequest({"tracks": [{"id": "x", "name": "a"}]})))
+        self.assertEqual(out["status"], 400)
+
+    def test_queue_view(self):
+        h, handler = self.harness()
+        h.player.queue = [type("T", (), {"id": 3, "name": "n", "artists": ["a"], "album": "", "duration_ms": 5, "cover": ""})()]
+        h.player.index = 0
+        out = asyncio.run(handler.handle_kiosk_netease_music_queue(FakeRequest()))
+        self.assertEqual(out["json"]["items"][0]["id"], 3)
+        self.assertEqual(out["json"]["index"], 0)
+
+    def test_like(self):
+        from unittest import mock
+        h, handler = self.harness()
+        with mock.patch("plugins_func.netease.api.like", return_value=True):
+            out = asyncio.run(handler.handle_kiosk_netease_music_like(FakeRequest({"id": 5, "like": True})))
+        self.assertTrue(out["json"]["ok"])
+        out = asyncio.run(handler.handle_kiosk_netease_music_like(FakeRequest({"id": "x", "like": True})))
+        self.assertEqual(out["status"], 400)
+
+    def test_playlists(self):
+        from unittest import mock
+        h, handler = self.harness()
+        handler._netease_music_client = lambda: mock.Mock(account=lambda: {"userId": 42})
+        with mock.patch("plugins_func.netease.api.user_playlists",
+                        return_value=[{"id": 1, "name": "我喜欢", "coverImgUrl": "c", "trackCount": 9}]):
+            out = asyncio.run(handler.handle_kiosk_netease_music_playlists(FakeRequest()))
+        self.assertEqual(out["json"]["items"][0]["name"], "我喜欢")
+        self.assertEqual(out["json"]["items"][0]["count"], 9)
+
+
 if __name__ == "__main__":
     unittest.main()

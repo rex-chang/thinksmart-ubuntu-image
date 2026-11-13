@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 MARKER = "# NETEASE_MUSIC_API_PATCH_V1"
+MARKER2 = "# NETEASE_MUSIC_API_PATCH_V2"
 IMPORT_ANCHOR = "from aiohttp import web\n"
 ROUTE_ANCHOR = '                web.post("/kiosk/chat/clear", self.handle_kiosk_chat_clear),\n'
 METHOD_ANCHOR = "    async def handle_kiosk_llm(self, request: web.Request):\n"
@@ -202,6 +203,151 @@ METHODS = '''    # NETEASE_MUSIC_API_PATCH_V1
 
 '''
 
+ROUTES2 = """                web.get("/kiosk/netease/music/search", self.handle_kiosk_netease_music_search),
+                web.get("/kiosk/netease/music/playlists", self.handle_kiosk_netease_music_playlists),
+                web.get("/kiosk/netease/music/playlist_tracks", self.handle_kiosk_netease_music_playlist_tracks),
+                web.get("/kiosk/netease/music/queue", self.handle_kiosk_netease_music_queue),
+                web.post("/kiosk/netease/music/play_queue", self.handle_kiosk_netease_music_play_queue),
+                web.post("/kiosk/netease/music/play_index", self.handle_kiosk_netease_music_play_index),
+                web.post("/kiosk/netease/music/like", self.handle_kiosk_netease_music_like),
+"""
+METHODS2 = '''    # NETEASE_MUSIC_API_PATCH_V2
+    @staticmethod
+    def _netease_music_track(t):
+        return {"id": t.id, "name": t.name, "artists": list(t.artists or []),
+                "album": t.album or "", "duration_ms": t.duration_ms or 0,
+                "cover": getattr(t, "cover", "") or ""}
+
+    @staticmethod
+    def _netease_music_client():
+        from plugins_func.netease import eapi, session
+
+        if not session.load():
+            raise PermissionError("还没有登录网易云")
+        return eapi.Client()
+
+    async def _netease_music_list(self, request, fn):
+        if not self._from_this_machine(request):
+            return self._error("仅限本机", 403)
+        try:
+            items = await self._blocking(fn)
+        except PermissionError as exc:
+            return self._error(str(exc), 401)
+        except Exception as exc:
+            return self._error(f"请求失败：{type(exc).__name__}", 502)
+        return self._json({"ok": True, "items": [self._netease_music_track(t) for t in items]})
+
+    async def handle_kiosk_netease_music_search(self, request: web.Request):
+        if not self._from_this_machine(request):
+            return self._error("仅限本机", 403)
+        q = str(request.query.get("q") or "").strip()[:60]
+        if not q:
+            return self._error("缺少搜索词", 400)
+        from plugins_func.netease import api
+        return await self._netease_music_list(request, lambda: api.search_songs(self._netease_music_client(), q, 20))
+
+    async def handle_kiosk_netease_music_playlists(self, request: web.Request):
+        if not self._from_this_machine(request):
+            return self._error("仅限本机", 403)
+
+        def fetch():
+            from plugins_func.netease import api
+            client = self._netease_music_client()
+            me = client.account()
+            if not me:
+                raise PermissionError("还没有登录网易云")
+            return api.user_playlists(client, me["userId"])
+
+        try:
+            pls = await self._blocking(fetch)
+        except PermissionError as exc:
+            return self._error(str(exc), 401)
+        except Exception as exc:
+            return self._error(f"请求失败：{type(exc).__name__}", 502)
+        items = [{"id": p.get("id"), "name": p.get("name", ""), "cover": p.get("coverImgUrl", ""),
+                  "count": p.get("trackCount", 0)} for p in pls]
+        return self._json({"ok": True, "items": items})
+
+    async def handle_kiosk_netease_music_playlist_tracks(self, request: web.Request):
+        if not self._from_this_machine(request):
+            return self._error("仅限本机", 403)
+        try:
+            pid = int(request.query.get("id") or 0)
+        except ValueError:
+            pid = 0
+        if not pid:
+            return self._error("缺少歌单 id", 400)
+        from plugins_func.netease import api
+        return await self._netease_music_list(request, lambda: api.playlist_tracks(self._netease_music_client(), pid))
+
+    async def handle_kiosk_netease_music_queue(self, request: web.Request):
+        if not self._from_this_machine(request):
+            return self._error("仅限本机", 403)
+        player = self._netease_music_player()
+        items = [{"id": t.id, "name": t.name, "artists": list(t.artists or []),
+                  "album": t.album or "", "duration_ms": t.duration_ms or 0,
+                  "cover": getattr(t, "cover", "") or ""} for t in (player.queue or [])[:100]]
+        return self._json({"ok": True, "items": items, "index": player.index})
+
+    async def handle_kiosk_netease_music_play_queue(self, request: web.Request):
+        if not self._from_this_machine(request):
+            return self._error("仅限本机", 403)
+        body, error = await self._netease_music_body(request, ("tracks", "start"))
+        if error:
+            return error
+        from plugins_func.netease.api import Track
+        raw = body.get("tracks")
+        if not isinstance(raw, list) or not raw or len(raw) > 200:
+            return self._error("tracks 格式错误", 400)
+        tracks = []
+        for t in raw:
+            if not isinstance(t, dict) or type(t.get("id")) is not int or not t.get("name"):
+                return self._error("track 格式错误", 400)
+            artists = t.get("artists")
+            tracks.append(Track(id=t["id"], name=str(t["name"])[:200],
+                                artists=[str(a)[:80] for a in artists][:10] if isinstance(artists, list) else [],
+                                album=str(t.get("album") or "")[:200],
+                                duration_ms=int(t.get("duration_ms") or 0),
+                                cover=str(t.get("cover") or "")[:500]))
+        try:
+            start = max(0, min(int(body.get("start") or 0), len(tracks) - 1))
+        except (TypeError, ValueError):
+            start = 0
+        player = self._netease_music_player()
+        await self._blocking(player.play_queue, tracks, start)
+        return self._json({"ok": True, "count": len(tracks)})
+
+    async def handle_kiosk_netease_music_play_index(self, request: web.Request):
+        if not self._from_this_machine(request):
+            return self._error("仅限本机", 403)
+        body, error = await self._netease_music_body(request, ("index",))
+        if error:
+            return error
+        if type(body.get("index")) is not int or body["index"] < 0:
+            return self._error("index 格式错误", 400)
+        player = self._netease_music_player()
+        ok = await self._blocking(player.play_at, body["index"])
+        return self._json({"ok": bool(ok)})
+
+    async def handle_kiosk_netease_music_like(self, request: web.Request):
+        if not self._from_this_machine(request):
+            return self._error("仅限本机", 403)
+        body, error = await self._netease_music_body(request, ("id", "like"))
+        if error:
+            return error
+        if type(body.get("id")) is not int or type(body.get("like")) is not bool:
+            return self._error("参数格式错误", 400)
+        from plugins_func.netease import api
+        try:
+            ok = await self._blocking(api.like, self._netease_music_client(), body["id"], body["like"])
+        except PermissionError as exc:
+            return self._error(str(exc), 401)
+        except Exception as exc:
+            return self._error(f"操作失败：{type(exc).__name__}", 502)
+        return self._json({"ok": bool(ok)})
+
+'''
+
 
 def _backup(path: Path, stamp: str) -> None:
     shutil.copy2(path, path.with_name(f"{path.name}.bak-{stamp}"))
@@ -219,16 +365,23 @@ def apply(root: Path) -> str:
     if not path.is_file():
         raise ValueError(f"missing Hub handler: {path}")
     text = path.read_text(encoding="utf-8")
-    if MARKER in text:
+    changed = []
+    if MARKER not in text:
+        import_line = IMPORT if "import json\n" not in text else ""
+        text = _once(text, IMPORT_ANCHOR, IMPORT_ANCHOR + import_line, "import")
+        text = _once(text, ROUTE_ANCHOR, ROUTES + ROUTE_ANCHOR, "route")
+        text = _once(text, METHOD_ANCHOR, METHODS + METHOD_ANCHOR, "method")
+        changed.append("v1")
+    if MARKER2 not in text:
+        text = _once(text, ROUTE_ANCHOR, ROUTES2 + ROUTE_ANCHOR, "route2")
+        text = _once(text, METHOD_ANCHOR, METHODS2 + METHOD_ANCHOR, "method2")
+        changed.append("v2")
+    if not changed:
         return "already"
-    import_line = IMPORT if "import json\n" not in text else ""
-    updated = _once(text, IMPORT_ANCHOR, IMPORT_ANCHOR + import_line, "import")
-    updated = _once(updated, ROUTE_ANCHOR, ROUTES + ROUTE_ANCHOR, "route")
-    updated = _once(updated, METHOD_ANCHOR, METHODS + METHOD_ANCHOR, "method")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     _backup(path, stamp)
-    path.write_text(updated, encoding="utf-8")
-    return "patched"
+    path.write_text(text, encoding="utf-8")
+    return "patched " + "+".join(changed)
 
 
 def main() -> int:
