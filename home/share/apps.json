@@ -1,0 +1,56 @@
+{
+  "version": 2,
+  "note": "主页底部的磁贴。group: app = 左侧功能磁贴（彩色方块图标），quick = 分隔线右侧的快捷开关（sub 是副标题）。color 写一个颜色。action.type 支持 xiaozhi / xiaozhi-settings / brightness / focus / messages（音乐卡片在主页中栏，服务器监控与学习陪伴未部署）",
+  "apps": [
+    {
+      "id": "xiaozhi",
+      "group": "app",
+      "title": "小麦",
+      "icon": "xiaozhi",
+      "color": "#7c8cff",
+      "action": {
+        "type": "xiaozhi"
+      }
+    },
+    {
+      "id": "focus",
+      "group": "app",
+      "title": "计时",
+      "icon": "timer",
+      "color": "#ff8a5c",
+      "action": {
+        "type": "focus"
+      }
+    },
+    {
+      "id": "messages",
+      "group": "app",
+      "title": "留言板",
+      "icon": "message",
+      "color": "#f5c04a",
+      "action": {
+        "type": "messages"
+      }
+    },
+    {
+      "id": "brightness",
+      "group": "quick",
+      "title": "亮度",
+      "icon": "sun",
+      "sub": "亮度、主题",
+      "action": {
+        "type": "brightness"
+      }
+    },
+    {
+      "id": "settings",
+      "group": "quick",
+      "title": "设置",
+      "icon": "gear",
+      "sub": "Wi-Fi、音量",
+      "action": {
+        "type": "xiaozhi-settings"
+      }
+    }
+  ]
+}

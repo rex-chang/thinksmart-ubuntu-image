@@ -1,0 +1,2 @@
+# Mount in the system manager, never in a udev worker's private mount namespace.
+ACTION=="add", SUBSYSTEM=="block", SUBSYSTEMS=="usb", KERNEL=="sd*", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="vfat|exfat|ntfs|ext2|ext3|ext4", TAG+="systemd", ENV{SYSTEMD_WANTS}+="thinksmart-usb-mount@%k.service"

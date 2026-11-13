@@ -1,0 +1,30 @@
+[Unit]
+Description=ThinkSmart home page (clock / weather / calendar / music / app tiles; loopback :8095)
+After=network.target
+Before=thinksmart-client.service thinksmart-kiosk.service
+
+[Service]
+User=ubuntu
+Group=ubuntu
+ExecStart=/opt/thinksmart-addons/venv/bin/python /usr/local/bin/thinksmart-home.py
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 XDG_RUNTIME_DIR=/run/user/1000
+StateDirectory=thinksmart-home
+StateDirectoryMode=0700
+UMask=0077
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=96M
+TasksMax=64
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

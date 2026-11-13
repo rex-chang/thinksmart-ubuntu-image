@@ -1,0 +1,11 @@
+[Unit]
+Description=ThinkSmart View USB Type-C Host (U-Disk) Mode
+After=local-fs.target sys-kernel-debug.mount
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/usb-mode host
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

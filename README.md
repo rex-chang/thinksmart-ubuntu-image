@@ -1007,6 +1007,7 @@ bootstrap 阶段（[A5](#a5-ssh-登录-bootstrap)）的 USB 网络**并不保证
 ## 致谢和声明
 
 - 设备移植、lk2nd、bootstrap 镜像和分区方案来自 [rickx/ubuntu-thinksmart](https://github.com/rickx/ubuntu-thinksmart)，没有它就没有这个项目。上游也感谢了 FelixKa 的 postmarketOS 设备包和 TAS5782M 驱动，以及 postmarketOS 项目的内核。
+- 主界面（时钟 / 天气 / 农历 / 音乐卡片 / 应用切换）、亮度面板、新版熄屏守护、可视对讲、AirPlay 接收和 USB 工具合并自 [fubin0478/thinksmart-view](https://github.com/fubin0478/thinksmart-view)（MIT），并做了适配：音乐卡片控制网易云音乐（hub 侧插件 + mpv，通过 `/kiosk/netease/music/*` 桥接）、番茄钟改为本地运行、服务器监控和学习陪伴未部署。
 - 刷机工具是 [bkerler/edl](https://github.com/bkerler/edl)。
 - 镜像由 Ubuntu 24.04 的软件包构建。本项目是个人项目，与 Canonical、联想（Lenovo）、高通（Qualcomm）没有任何关系。「Ubuntu」「ThinkSmart」是各自所有者的商标。
 - 刷机有风险，可能让设备无法启动。请先做好整盘备份，风险自负。
@@ -1017,12 +1018,28 @@ bootstrap 阶段（[A5](#a5-ssh-登录-bootstrap)）的 USB 网络**并不保证
 | --- | --- |
 | `image/` | 出镜像（从设备抓取、清理、打包）、备份还原用户数据的脚本 |
 | `kiosk/` | 展示屏外壳（Weston + WebKitGTK 全屏页面）、欢迎页、屏幕键盘、GPU 看门狗、WiFi 省电和 NTP 设置 |
-| `screen/` | 自动熄屏、接近传感器和加速度唤醒 |
+| `home/` | 主界面（8095：时钟 / 天气 / 农历 / 日历 / 网易云音乐卡片 / 番茄钟 / 留言板）、亮度面板、`home_overlay.js` 应用切换层；`deploy.sh` 负责部署并启用 |
+| `screen/` | 自动熄屏（夜间模式、日出唤醒、WebKit 冻结）、环境光 / 接近传感器、加速度唤醒 |
+| `intercom/` | 可视对讲（可选）：摄像头双向视频、留言中转、反向 SSH 隧道 |
+| `airplay/` | AirPlay 接收（可选）：UxPlay 监督进程、通话/投屏联动 |
+| `usb/` | USB host 模式切换、U 盘自动挂载 |
 | `xiaozhi/` | 麦克风服务和音频配置（ALSA、PipeWire、WirePlumber） |
+| `netease/` | 网易云音乐：hub 侧插件（搜索 / 播放 / 歌词 / QR 登录）、kiosk 音乐桥 API、部署脚本和测试 |
 | `bluetooth/` | 蓝牙音箱：WirePlumber 配置（只做 A2DP 接收，手机的声音交给语音客户端）、BlueZ 设置 |
 | `update/` | 在线更新（语音客户端和系统层） |
 | `mesa/` | 补丁版 Mesa（GPU 白屏、卡死修复）的构建脚本和补丁 |
 | `codec-dmic/`、`kernel/` | 第二颗麦克风的驱动和设备树补丁，以及构建它用的内核环境 |
 | `zram/` | zram 压缩内存 |
+
+主界面部署（在 `./netease/deploy.sh` 之后）：
+
+```sh
+./home/deploy.sh                 # venv + 主界面 + 升级后的 kiosk/熄屏
+./home/deploy.sh --airplay       # 再启用 AirPlay（需要 uxplay）
+./home/deploy.sh --intercom      # 再启用可视对讲（需要 /etc/thinksmart-intercom 密钥）
+```
+
+天气卡片需要 hub 的 `data/.config.yaml` 里有 `plugins.get_weather` 凭证（和语音天气插件共用）。
+音乐卡片/对讲里的环境音、睡眠歌单、学习陪伴依赖原项目的 QQ 音乐服务和学习服务，本构建未包含，界面上已隐藏。
 
 本仓库以 MIT 许可发布，见 [LICENSE](LICENSE)。

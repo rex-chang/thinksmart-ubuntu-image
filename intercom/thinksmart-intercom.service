@@ -1,0 +1,14 @@
+[Unit]
+Description=ThinkSmart View Camera Monitor & Two-Way Intercom Server
+After=network.target user@1000.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/opt/thinksmart-addons/venv/bin/python /usr/local/bin/thinksmart-intercom.py
+Restart=always
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+
+[Install]
+WantedBy=multi-user.target

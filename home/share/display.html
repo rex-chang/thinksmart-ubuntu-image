@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>屏幕亮度</title><script>try{if(localStorage.getItem('ts.theme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}</script><style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;height:100%;overflow:hidden;background:radial-gradient(360px 220px at 14% 0%,rgba(255,204,77,.10),transparent 72%),linear-gradient(180deg,#16243a 0%,#111c2d 100%);color:#eef4ff;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans CJK SC","PingFang SC",sans-serif;-webkit-user-select:none;user-select:none;font-variant-numeric:tabular-nums}body{padding:22px 26px 18px;font-size:18.5px}header,.row{display:flex;align-items:center;justify-content:space-between;gap:14px}h1{font-size:25px;margin:0;font-weight:750;display:flex;align-items:center;gap:10px;letter-spacing:.2px}h1 .sun-ico{position:relative;width:28px;height:28px;flex-shrink:0;contain:strict}h1 svg{position:absolute;inset:0;width:28px;height:28px;display:block}h1 .rays{will-change:transform;backface-visibility:hidden;animation:dpSpin 36s steps(72) infinite}h1 .aura{will-change:transform,opacity;backface-visibility:hidden;transform:scale(var(--sun-s,1));opacity:var(--sun-a,.9);transition:transform .14s ease-out,opacity .14s ease-out}button{color:inherit;font:inherit;border:1px solid #9ec2ff29;background:#21324c;border-radius:14px;min-height:46px;padding:0 17px;font-weight:650;cursor:pointer;touch-action:manipulation;transition:transform .14s cubic-bezier(.22,1,.36,1),background-color .14s ease,border-color .12s ease,color .12s ease}#close{font-size:28px;width:46px;min-height:46px;padding:0;background:#ffffff0f;border:1px solid #ffffff14;color:#a9bbd6;line-height:1}#mode{font-size:19.5px;font-weight:700}#auto{font-size:17px;padding:0 18px}#auto[aria-checked=true]{background:linear-gradient(135deg,#1d6d66,#165550);border-color:#5ce0ce85;color:#bdfaf0}.row{margin-top:14px}label[for=level]{font-size:18.5px;font-weight:650;color:#d6e4f9}#value{font-size:36px;line-height:1.1;font-weight:750;color:#83ccff}#sensor,#note,#feedback{color:#a8bad5;font-size:15.5px;line-height:1.48}#sensor{margin-top:7px}input{--fill:100%;-webkit-appearance:none;appearance:none;width:100%;height:48px;margin:8px 0 6px;background:transparent;touch-action:none;cursor:pointer;outline:none}input::-webkit-slider-runnable-track{height:12px;border-radius:6px;background:linear-gradient(to right,#6ec4ff 0 var(--fill),#33445a var(--fill) 100%);box-shadow:inset 0 1px 2px #0006}input::-webkit-slider-thumb{-webkit-appearance:none;width:34px;height:34px;margin-top:-11px;border:3px solid #c2e8ff;border-radius:50%;background:#4daef5;box-shadow:0 4px 14px rgba(0,0,0,.45);transition:transform .12s cubic-bezier(.22,1,.36,1)}input:active::-webkit-slider-thumb{transform:scale(1.13);transition:transform .05s ease-out}input:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px #72c4ff40}.presets{display:flex;gap:10px;margin-top:4px}.presets button{flex:1;min-height:50px;font-size:18px;font-weight:700;padding:0 8px}.presets button.on{background:linear-gradient(145deg,#215787,#184166);border-color:#74c5ffb3;color:#e8f5ff}button:active{background:#354e6e;transform:scale(.96);transition:transform .05s ease-out,background-color .05s ease}#note{margin:13px 0 0}#feedback{margin-top:3px;min-height:23px;color:#65dfc3;font-weight:600}#feedback.error{color:#ffadab}@keyframes dpSpin{to{transform:rotate(360deg)}}@keyframes dpRise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}body.cold-enter .row,body.cold-enter .presets,body.cold-enter #note{animation:dpRise .18s cubic-bezier(.22,1,.36,1) backwards}body.motion-paused h1 .rays{animation:none!important;will-change:auto!important}body.motion-paused h1 .aura{transition:none!important;will-change:auto!important}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ===== 2026-11-12 design layer (Claude): same controls and logic; the home page's tokens, plus 深色 / 浅色 ===== */
+:root{--bg:#121a2b;--ctl:#1d2840;--ctl-a:#26334f;--t1:#f2f5fb;--t2:#b4bfd4;--t3:#8a96ad;--acc:#5ab8ff;--acc-soft:#17243a;--acc-ink:#a9dcff;--on-acc:#0a101c;--ok:#3ddc97;--ok-soft:#14291f;--ok-ink:#8ff0c4;--bad-ink:#ffb3b3;--track:#232e45}
+html[data-theme="light"]{color-scheme:light;--bg:#f6f2ea;--ctl:#e8e1d5;--ctl-a:#dbd3c6;--t1:#18191b;--t2:#43454a;--t3:#5f6268;--acc:#0f6d63;--acc-soft:#c3dbd5;--acc-ink:#0b6158;--on-acc:#faf8f4;--ok:#216e37;--ok-soft:#cfe3d3;--ok-ink:#216e37;--bad-ink:#a82626;--track:#d6cdbf}
+html,body{background:var(--bg);color:var(--t1);font-family:"Noto Sans CJK SC","Noto Sans SC","PingFang SC",-apple-system,sans-serif}
+h1{font-weight:700}
+h1 .rays{animation:none;will-change:auto}
+html[data-theme="light"] h1 .aura circle{fill:#e08316;fill-opacity:.22}
+html[data-theme="light"] h1 .rays circle{fill:#d97706}
+html[data-theme="light"] h1 .rays g{stroke:#c86a14}
+button{border:none;background:var(--ctl);border-radius:16px;min-height:52px;font-weight:700}
+button:active{background:var(--ctl-a)}
+#close{width:52px;min-height:52px;border:none;background:var(--ctl);color:var(--t2)}
+#mode{font-weight:700}
+#auto[aria-checked=true]{background:var(--ok-soft);border:none;box-shadow:inset 0 0 0 2px var(--ok);color:var(--ok-ink)}
+label[for=level]{font-weight:400;color:var(--t2)}
+#value{font-weight:700;color:var(--acc)}
+#sensor,#note{color:var(--t3)}
+#feedback{color:var(--ok-ink)}#feedback.error{color:var(--bad-ink)}
+input::-webkit-slider-runnable-track{background:linear-gradient(to right,var(--acc) 0 var(--fill),var(--track) var(--fill) 100%);box-shadow:none}
+input::-webkit-slider-thumb{border:3px solid var(--bg);background:var(--t1);box-shadow:none}
+input:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px var(--acc-soft)}
+.presets button{border:none}
+.presets button.on{background:var(--acc-soft);border:none;box-shadow:inset 0 0 0 2px var(--acc);color:var(--acc-ink)}
+.theme-row{margin-top:16px}
+.th-lbl{font-size:18.5px;color:var(--t2)}
+.seg{display:flex;gap:4px;padding:4px;border-radius:18px;background:var(--ctl)}
+.seg button{min-height:46px;padding:0 26px;border-radius:14px;background:transparent;color:var(--t2);font-size:18px}
+.seg button:active{background:var(--ctl-a)}
+.seg button.on,.seg #auto[aria-checked=true]{background:var(--acc);color:var(--on-acc);box-shadow:none}
+.seg button{padding:0 20px}
+#mode{font-size:18.5px;font-weight:400;color:var(--t2)}
+.presets{gap:8px}
+</style></head><body><header><h1><span class="sun-ico"><svg class="aura" viewBox="0 0 64 64"><circle cx="32" cy="32" r="18" fill="#ffc94d" fill-opacity=".22"/></svg><svg class="rays" viewBox="0 0 64 64"><circle cx="32" cy="32" r="12" fill="#ffca4b"/><g stroke="#ffd76e" stroke-width="4.4" stroke-linecap="round"><path d="M32 7v6.5M32 50.5V57M7 32h6.5M50.5 32H57M14.3 14.3l4.6 4.6M45.1 45.1l4.6 4.6M14.3 49.7l4.6-4.6M45.1 18.9l4.6-4.6"/></g></svg></span>屏幕亮度</h1><button id="close" aria-label="关闭亮度面板">×</button></header>
+<div class="row"><span id="mode">调光方式</span><div class="seg" role="group" aria-label="调光方式"><button type="button" id="manual" class="on" aria-pressed="true">手动</button><button type="button" id="auto" role="switch" aria-checked="false">跟随光线</button></div></div><div id="sensor">正在读取屏幕状态…</div>
+<div class="row"><label for="level">亮度</label><output id="value" for="level">—</output></div><input id="level" aria-label="屏幕亮度百分比" type="range" min="0" max="100" step="1" value="100">
+<div class="presets"><button data-level="0">最暗</button><button data-level="25">25%</button><button data-level="50">50%</button><button data-level="75">75%</button><button data-level="100">100%</button></div>
+<div class="row theme-row"><span class="th-lbl">界面主题</span><div class="seg" role="radiogroup" aria-label="界面主题"><button type="button" data-theme-btn="dark" role="radio" aria-checked="true">深色</button><button type="button" data-theme-btn="light" role="radio" aria-checked="false">浅色</button><button type="button" data-theme-btn="auto" role="radio" aria-checked="false">自动</button></div></div>
+<p id="note">拖动滑条即可切换为手动亮度</p><div id="feedback" role="status" aria-live="polite"></div>
+<script>
+(()=>{'use strict';
+const $=id=>document.getElementById(id), slider=$('level'), presets=[...document.querySelectorAll('[data-level]')];
+const wasPrewarm=window.name==='ts-display-prewarm';if(wasPrewarm)try{window.name=''}catch(e){}
+if(window.parent===window){document.body.classList.add('cold-enter');setTimeout(()=>document.body.classList.remove('cold-enter'),260)}
+let panelVis=!wasPrewarm,wakeRefreshT=0;if(!panelVis)document.body.classList.add('motion-paused');
+const isActive=()=>panelVis&&!document.hidden;
+let state={},dragging=false,rect=null,paintFrame=null,latestLevel=-1;
+let revision=0,pending=null,inFlight=null,sending=false,refreshing=false,timer=null,nextPreview=0,optimisticUntil=0,uncommitted=false;
+const commitSent=()=>((pending?.kind==='commit'&&pending.body?.level===latestLevel)||(!pending&&inFlight?.kind==='commit'&&inFlight.body?.level===latestLevel));
+const commitDispatched=()=>!pending&&inFlight?.kind==='commit'&&inFlight.body?.level===latestLevel;
+const needsCommit=()=>uncommitted&&!commitSent();
+function markPresets(){for(const b of presets){const on=!state.auto&&Number(b.dataset.level)===latestLevel;b.classList.toggle('on',on);b.setAttribute('aria-pressed',String(on))}}
+function paint(n){
+  latestLevel=n;
+  if(paintFrame!==null)return;
+  paintFrame=requestAnimationFrame(()=>{paintFrame=null;slider.value=latestLevel;slider.style.setProperty('--fill',latestLevel+'%');document.documentElement.style.setProperty('--sun-s',(.78+latestLevel*.0036).toFixed(3));document.documentElement.style.setProperty('--sun-a',(.38+latestLevel*.0062).toFixed(3));$('value').textContent=latestLevel+'%';markPresets()});
+}
+function mode(auto){state.auto=auto;$('auto').setAttribute('aria-checked',String(auto));$('manual').classList.toggle('on',!auto);$('manual').setAttribute('aria-pressed',String(!auto));markPresets()}
+function feedback(text,error=false){$('feedback').className=error?'error':'';$('feedback').textContent=text}
+function render(s){
+  state=s;mode(s.auto);
+  if(!dragging&&!uncommitted&&!pending&&!sending&&performance.now()>=optimisticUntil&&s.level!==latestLevel)paint(s.level);
+  $('sensor').textContent=s.sensor_ok&&Number.isFinite(s.lux)?'环境光 '+s.lux.toFixed(1)+' lx · '+(s.auto?'正在缓慢跟随光线':'自动调光可用'):'光线传感器暂不可用 · 保持当前亮度';
+  $('note').textContent=(s.screen_off?'自动熄屏已开启':'常亮已开启')+' · '+(s.dimmed?'睡眠时段正在调暗':'滑动实时调节，松手保存');
+  $('auto').disabled=!s.sensor_ok&&!s.auto;
+}
+async function refresh(force=false){
+  if((!force&&!isActive())||refreshing||sending||dragging||pending||uncommitted)return;
+  refreshing=true;const version=revision,ctl=new AbortController(),tid=setTimeout(()=>ctl.abort(),3000);
+  try{const r=await fetch('/api/display',{cache:'no-store',signal:ctl.signal});if(!r.ok)throw Error();const s=await r.json();if(version===revision&&!dragging&&!pending&&!sending&&!uncommitted)render(s)}catch(e){if(version===revision)$('sensor').textContent='暂时无法读取屏幕状态'}finally{clearTimeout(tid);refreshing=false}
+}
+function enqueue(kind,body){
+  pending={kind,body,version:++revision};
+  if(kind!=='preview'&&timer!==null){clearTimeout(timer);timer=null}
+  pump();
+}
+async function pump(){
+  if(sending||!pending||timer!==null)return;
+  const wait=nextPreview-performance.now();
+  if(pending.kind==='preview'&&wait>0){timer=setTimeout(()=>{timer=null;pump()},wait);return}
+  const job=pending;pending=null;inFlight=job;sending=true;const ctl=new AbortController(),tid=setTimeout(()=>ctl.abort(),5000);
+  try{
+    const url=job.kind==='preview'?'/api/display/preview':'/api/display';
+    const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(job.body),keepalive:job.kind!=='preview',signal:ctl.signal});
+    const result=await response.json().catch(()=>({}));if(!response.ok||!result.ok){const err=new Error(result.error||'调整失败，请重试');err.zh=true;throw err}
+    if(job.version===revision){
+      if(job.kind==='commit'){
+        uncommitted=false;optimisticUntil=performance.now()+600;render(result);mode(false);paint(job.body.level);feedback('亮度已保存');
+      }else if(job.kind==='auto'){
+        uncommitted=false;optimisticUntil=0;render(result);paint(result.level);feedback(result.auto?'已开启自动调光，亮度会逐渐变化':'已固定当前亮度');
+      }
+    }
+  }catch(e){if(job.version===revision){if(job.kind!=='preview'){optimisticUntil=0;if(!dragging)uncommitted=false}if(job.kind==='auto')mode(!job.body.auto);feedback(e?.zh?e.message:(e?.name==='AbortError'?'保存超时，请重试':'暂时无法调整亮度'),true)}}
+  finally{clearTimeout(tid);inFlight=null;sending=false;nextPreview=performance.now()+80;pump()}
+}
+function manual(n,commit=false){
+  n=Math.max(0,Math.min(100,Math.round(n)));uncommitted=true;optimisticUntil=performance.now()+1200;paint(n);mode(false);
+  enqueue(commit?'commit':'preview',{level:n});
+}
+function point(event){if(!rect||rect.width<=32)return;const n=Math.round(Math.max(0,Math.min(1,(event.clientX-rect.left-16)/(rect.width-32)))*100);if(n!==latestLevel||!uncommitted)manual(n)}
+let dragTimer=0,refreshTimer=0;
+const stopDragTimer=()=>{if(dragTimer){clearInterval(dragTimer);dragTimer=0}};
+const startDragTimer=()=>{if(!dragTimer)dragTimer=setInterval(()=>{if(dragging&&uncommitted)enqueue('preview',{level:latestLevel});else if(!dragging)stopDragTimer()},600)};
+const syncRefreshTimer=()=>{if(isActive()){if(!refreshTimer)refreshTimer=setInterval(refresh,2000)}else{if(refreshTimer){clearInterval(refreshTimer);refreshTimer=0}stopDragTimer()}};
+slider.addEventListener('pointerdown',event=>{
+  const r=slider.getBoundingClientRect();if(!r||r.width<=32)return;
+  event.preventDefault();dragging=true;rect=r;startDragTimer();
+  try{slider.setPointerCapture(event.pointerId)}catch(e){}
+  feedback('实时调节中…');point(event);
+});
+slider.addEventListener('pointermove',event=>{if(dragging)point(event)});
+function release(){if(!dragging)return;dragging=false;stopDragTimer();manual(latestLevel>=0?latestLevel:(Number(slider.value)||100),true)}
+slider.addEventListener('pointerup',release);slider.addEventListener('pointercancel',release);slider.addEventListener('lostpointercapture',release);
+window.addEventListener('pointerup',release);window.addEventListener('pointercancel',release);
+slider.addEventListener('input',()=>{if(!dragging)manual(Number(slider.value))});
+slider.addEventListener('change',()=>{if(!dragging)manual(Number(slider.value),true)});
+slider.addEventListener('blur',()=>{if(needsCommit()&&!dragging)manual(latestLevel,true)});
+for(const button of presets)button.onclick=()=>manual(Number(button.dataset.level),true);
+const setAuto=next=>{if(!!state.auto===next)return;dragging=false;stopDragTimer();uncommitted=false;mode(next);enqueue('auto',{auto:next})};
+$('auto').onclick=()=>setAuto(true);$('manual').onclick=()=>setAuto(false);
+window.addEventListener('pagehide',()=>{
+  if(uncommitted&&!commitDispatched()){pending=null;uncommitted=false;fetch('/api/display',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({level:latestLevel}),keepalive:true}).catch(()=>{})}
+});
+const parentOrigin=()=>{try{if(document.referrer){const o=new URL(document.referrer).origin;if(/^http:\/\/(127\.0\.0\.1|localhost):(8090|8095)$/.test(o))return o}}catch(e){}return '*'};
+// 2026-11-12: 深色 / 浅色. The overlay remembers the choice and tells every page; this panel keeps a copy too.
+const themeBtns=[...document.querySelectorAll('[data-theme-btn]')];
+let themeMode='manual';try{if(localStorage.getItem('ts.themeMode')==='auto')themeMode='auto'}catch(e){}
+// 2026-11-13: 自动 = the overlay follows sunrise / sunset; it tells this panel which theme is showing and whether 自动 is on
+function paintTheme(t,m){if(m==='auto'||m==='manual'){themeMode=m;try{localStorage.setItem('ts.themeMode',m)}catch(e){}}if(t==='light'||t==='dark'){try{localStorage.setItem('ts.theme',t)}catch(e){}if(t==='light')document.documentElement.setAttribute('data-theme','light');else document.documentElement.removeAttribute('data-theme')}const cur=document.documentElement.getAttribute('data-theme')==='light'?'light':'dark';for(const b of themeBtns){const on=themeMode==='auto'?b.dataset.themeBtn==='auto':b.dataset.themeBtn===cur;b.classList.toggle('on',on);b.setAttribute('aria-checked',String(on))}}
+paintTheme(document.documentElement.getAttribute('data-theme')==='light'?'light':'dark');
+for(const b of themeBtns)b.onclick=()=>{const t=b.dataset.themeBtn;if(t==='auto'){paintTheme(null,'auto');feedback('已设为自动：日出后浅色，日落后深色')}else{paintTheme(t,'manual');feedback(t==='light'?'已切换为浅色主题':'已切换为深色主题')}if(window.parent!==window)parent.postMessage({thinksmart:'setTheme',theme:t},parentOrigin())};
+window.addEventListener('message',e=>{if(window.parent!==window&&e.source===window.parent&&/^http:\/\/(127\.0\.0\.1|localhost):(8090|8095)$/.test(e.origin)&&e.data?.ts==='display'&&(e.data.theme==='light'||e.data.theme==='dark'))paintTheme(e.data.theme,e.data.mode)});
+$('close').onclick=()=>{if(window.parent!==window){if(dragging)release();else if(needsCommit())manual(latestLevel,true);parent.postMessage({thinksmart:'closeBrightness'},parentOrigin())}else{if(dragging){dragging=false;stopDragTimer()}if(uncommitted&&!commitDispatched()){pending=null;uncommitted=false;fetch('/api/display',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({level:latestLevel}),keepalive:true}).catch(()=>{})}location.href='/'}};
+let idleClose=0;
+const armClose=()=>{clearTimeout(idleClose);if(!isActive()||window.parent===window)return;idleClose=setTimeout(()=>{if(!isActive())return;if(dragging||uncommitted||pending||sending){armClose();return}$('close').click()},30000)};
+if(window.parent!==window){addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();$('close').click()}});for(const ev of ['pointerdown','pointerup','touchstart','wheel','keydown','change'])addEventListener(ev,armClose,{capture:true,passive:true});armClose()}
+window.addEventListener('message',e=>{
+  if(window.parent!==window&&e.source===window.parent&&/^http:\/\/(127\.0\.0\.1|localhost):(8090|8095)$/.test(e.origin)&&e.data?.ts==='display'&&typeof e.data.visible==='boolean'){
+    panelVis=e.data.visible;
+    document.body.classList.toggle('motion-paused',!isActive());
+    clearTimeout(wakeRefreshT);wakeRefreshT=0;
+    syncRefreshTimer();
+    if(panelVis){if(!sending&&!pending)feedback('');armClose();wakeRefreshT=setTimeout(()=>{wakeRefreshT=0;if(isActive())refresh(true)},150)}else{clearTimeout(idleClose);if(dragging)release();else if(needsCommit())manual(latestLevel,true);feedback('')}
+  }
+});
+document.addEventListener('visibilitychange',()=>{document.body.classList.toggle('motion-paused',!isActive());syncRefreshTimer();if(isActive()){armClose();refresh(true)}else clearTimeout(idleClose)});refresh(true);syncRefreshTimer();
+if(window.parent!==window)parent.postMessage({thinksmart:'displayReady'},parentOrigin());
+})();
+</script></body></html>

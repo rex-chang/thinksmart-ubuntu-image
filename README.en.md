@@ -995,6 +995,7 @@ Known limitations:
 ## Credits and notices
 
 - The device port, lk2nd, the bootstrap image and the partitioning scheme come from [rickx/ubuntu-thinksmart](https://github.com/rickx/ubuntu-thinksmart); this project wouldn't exist without it. Upstream in turn credits FelixKa's postmarketOS device package and TAS5782M driver, and the postmarketOS project's kernel.
+- The home dashboard (clock / weather / lunar calendar / music card / app switching), the brightness panel, the upgraded screen blanker, the video intercom, the AirPlay receiver and the USB tools are merged from [fubin0478/thinksmart-view](https://github.com/fubin0478/thinksmart-view) (MIT), adapted here: the music card drives NetEase Cloud Music (the hub-side plugin + mpv, through the `/kiosk/netease/music/*` bridge), the pomodoro runs locally, and the server monitor / study companion are not deployed.
 - The flashing tool is [bkerler/edl](https://github.com/bkerler/edl).
 - The image is built from Ubuntu 24.04 packages. This is a personal project, not affiliated with Canonical, Lenovo or Qualcomm. "Ubuntu" and "ThinkSmart" are trademarks of their respective owners.
 - Flashing is risky and can leave the device unable to boot. Make the full backup first; you do this at your own risk.
@@ -1005,11 +1006,29 @@ Known limitations:
 | --- | --- |
 | `image/` | Building the image (capture from a device, clean, pack) and backing up / restoring user data |
 | `kiosk/` | The kiosk shell (Weston + a full-screen WebKitGTK page), welcome page, on-screen keyboard, GPU watchdog, Wi-Fi power-save and NTP settings |
-| `screen/` | Screen blanking, proximity and motion wake |
+| `home/` | The home dashboard (port 8095: clock / weather / lunar calendar / NetEase music card / pomodoro / messages), brightness panel, the `home_overlay.js` app-switching layer; `deploy.sh` installs and enables it |
+| `screen/` | Screen blanking (night rules, sunrise wake, WebKit freeze), ambient-light / proximity sensors, motion wake |
+| `intercom/` | Video intercom (optional): camera calls, message relay, reverse-SSH tunnel |
+| `airplay/` | AirPlay receiver (optional): UxPlay supervisor, call / mirroring coordination |
+| `usb/` | USB host-mode switching and USB-stick automount |
 | `xiaozhi/` | The microphone service and audio configuration (ALSA, PipeWire, WirePlumber) |
+| `netease/` | NetEase Cloud Music: hub-side plugin (search / play / lyrics / QR login), the kiosk music bridge API, deploy scripts and tests |
 | `update/` | Online updates (voice client and system layer) |
 | `mesa/` | Build script and patches of the patched Mesa (GPU white screen and hang fixes) |
 | `codec-dmic/`, `kernel/` | Driver and device-tree patch for the second microphone, and the kernel environment it is built in |
 | `zram/` | Compressed memory (zram) |
+
+Deploying the home dashboard (after `./netease/deploy.sh`):
+
+```sh
+./home/deploy.sh                 # venv + home page + upgraded kiosk/blanker
+./home/deploy.sh --airplay       # also enable AirPlay (needs `uxplay`)
+./home/deploy.sh --intercom      # also enable the intercom (needs /etc/thinksmart-intercom keys)
+```
+
+The weather card needs `plugins.get_weather` credentials in the hub's `data/.config.yaml`
+(shared with the voice weather plugin). Ambient mixes, sleep playlists and the study
+companion belong to the original project's QQ-music / study services, which are not part of
+this build; the UI hides them.
 
 This repository is released under the MIT license, see [LICENSE](LICENSE).

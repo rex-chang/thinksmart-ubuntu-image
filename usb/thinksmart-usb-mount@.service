@@ -1,0 +1,12 @@
+[Unit]
+Description=ThinkSmart USB music drive /dev/%I
+BindsTo=dev-%i.device
+After=dev-%i.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/usb-automount.sh add %I
+ExecStop=/usr/local/bin/usb-automount.sh remove %I
+TimeoutStartSec=15
+TimeoutStopSec=10

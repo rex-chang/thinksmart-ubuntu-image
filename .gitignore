@@ -9,3 +9,4 @@ __pycache__/
 
 # local scratch space (release caches, notes, session recovery)
 .tmp/
+.zcode/

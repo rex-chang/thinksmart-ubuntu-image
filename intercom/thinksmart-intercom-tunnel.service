@@ -1,0 +1,16 @@
+[Unit]
+Description=ThinkSmart View Intercom Reverse SSH Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/thinksmart-intercom-tunnel.sh
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
