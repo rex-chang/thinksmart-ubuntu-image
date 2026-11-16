@@ -57,6 +57,30 @@ class TestApi(unittest.TestCase):
         with self.assertRaises(LookupError):
             api.song_url(c, 1, "exhigh")
 
+    def test_song_url_falls_back_to_web_on_risk_control(self):
+        from unittest import mock
+
+        from plugins_func.netease import eapi
+
+        class Risky:
+            csrf = "csrf123"
+
+            def cookie_header(self):
+                return "MUSIC_U=x"
+
+            def eapi_post(self, path, data):
+                raise eapi.NeteaseError(api.NETWORK_RISK_CODE)
+
+        resp = mock.Mock()
+        resp.json = lambda: {"code": 200, "data": [
+            {"url": "http://x/1.flac", "type": "flac", "level": "exhigh",
+             "size": 99, "freeTrialInfo": None}]}
+        with mock.patch("requests.post", return_value=resp) as post:
+            s = api.song_url(Risky(), 1, "exhigh")
+        self.assertEqual(s.url, "https://x/1.flac")
+        self.assertEqual(post.call_args.kwargs["data"]["br"], 320000)
+        self.assertEqual(post.call_args.kwargs["headers"]["Cookie"], "MUSIC_U=x")
+
     def test_like_payload(self):
         c = Fake()
         api.like(c, 7, True)

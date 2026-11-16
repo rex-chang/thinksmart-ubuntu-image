@@ -188,7 +188,7 @@ body{display:grid;grid-template-columns:128px 392px 1fr;height:100%}
 </aside>
 
 <main class="right">
-  <div class="page-hd"><div class="page-title" id="pageTitle">我的音乐</div><span class="sub" id="pageSub"></span></div>
+  <div class="page-hd"><div class="page-title" id="pageTitle">我的音乐</div><span class="sub" id="pageSub"></span><button class="btn ghost" id="accPill"><svg class="i"><use href="#i-user"/></svg>账号</button></div>
 
   <section class="tab-view active" id="view-mine">
     <div class="chips" id="plChips"></div>
@@ -509,6 +509,7 @@ async function renderAccount(){
 }
 setInterval(()=>{ const d=new Date(); $('clock').textContent = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }, 1000);
 
+$('accPill').onclick = ()=>switchTab('account');
 poll();
 loadMine();
 // The kiosk overlay frames this page and waits for this handshake before showing it.

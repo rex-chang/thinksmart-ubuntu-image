@@ -113,8 +113,25 @@ def _lower(level):
     return LEVELS[:i + 1][::-1]
 
 
-def song_url(client, track_id, level="exhigh"):
-    for lv in _lower(level):
+_WEB_BR = {"standard": 128000, "higher": 192000, "exhigh": 320000,
+           "lossless": 999000, "hires": 1999000}
+
+
+def _stream_from(item, lv):
+    if item.get("freeTrialInfo"):
+        raise LookupError("unavailable")
+    if not item.get("url"):
+        return None
+    return Stream(
+        item["url"].replace("http://", "https://", 1),
+        (item.get("type") or item.get("encodeType") or "mp3").lower(),
+        item.get("level") or lv,
+        item.get("size") or 0,
+    )
+
+
+def _song_url_eapi(client, track_id, levels):
+    for lv in levels:
         res = client.eapi_post(
             "/api/song/enhance/player/url/v1",
             {
@@ -126,17 +143,45 @@ def song_url(client, track_id, level="exhigh"):
         code = res.get("code")
         if code not in (None, API_SUCCESS):
             raise eapi.NeteaseError(code)
-        item = (res.get("data") or [{}])[0]
-        if item.get("freeTrialInfo"):
-            raise LookupError("unavailable")
-        if item.get("url"):
-            return Stream(
-                item["url"].replace("http://", "https://", 1),
-                (item.get("type") or "mp3").lower(),
-                item.get("level") or lv,
-                item.get("size") or 0,
-            )
+        s = _stream_from((res.get("data") or [{}])[0], lv)
+        if s:
+            return s
     raise LookupError("unavailable")
+
+
+def _song_url_web(client, track_id, levels):
+    """Risk-control fallback (-460): the same session over the plain web endpoint still
+    resolves stream URLs when the PC-client transport is rejected; the server picks the
+    actual quality. Returns None-shaped LookupError when nothing resolves."""
+    import requests
+
+    for lv in levels:
+        r = requests.post(
+            eapi.WEB_BASE + "/api/song/enhance/player/url",
+            data={"ids": f"[{track_id}]", "br": _WEB_BR.get(lv, 320000), "csrf": client.csrf},
+            headers={"User-Agent": eapi.UA_WEB, "Cookie": client.cookie_header()},
+            timeout=15,
+        )
+        try:
+            d = r.json()
+        except ValueError:
+            continue
+        if d.get("code") not in (None, API_SUCCESS):
+            continue
+        s = _stream_from((d.get("data") or [{}])[0], lv)
+        if s:
+            return s
+    raise LookupError("unavailable")
+
+
+def song_url(client, track_id, level="exhigh"):
+    levels = _lower(level)
+    try:
+        return _song_url_eapi(client, track_id, levels)
+    except eapi.NeteaseError as e:
+        if e.code != NETWORK_RISK_CODE:
+            raise
+    return _song_url_web(client, track_id, levels)
 
 
 def like(client, track_id, like=True):
