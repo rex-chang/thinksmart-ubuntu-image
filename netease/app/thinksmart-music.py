@@ -71,7 +71,8 @@ async def proxy_post(request):
         tail = request.path[len('/api/login/'):]
         if tail not in LOGIN_POST:
             raise web.HTTPNotFound()
-        url = f'{HUB}/login/{tail}'
+        # the hub's logout route sits at /kiosk/netease/logout, without the /login/ segment
+        url = f'{HUB}/logout' if tail == 'logout' else f'{HUB}/login/{tail}'
     elif tail in POST_PATHS:
         url = f'{HUB}/music/{tail}'
     else:

@@ -511,6 +511,8 @@ setInterval(()=>{ const d=new Date(); $('clock').textContent = `${String(d.getHo
 
 poll();
 loadMine();
+// The kiosk overlay frames this page and waits for this handshake before showing it.
+if (window.parent !== window) { try { parent.postMessage({ts:'sub', cmd:'ready'}, '*'); } catch(e){} }
 </script>
 </body>
 </html>

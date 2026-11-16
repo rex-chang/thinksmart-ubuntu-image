@@ -379,18 +379,24 @@ def _once(text: str, anchor: str, replacement: str, label: str) -> str:
 # Targeted fixes for devices that already have V2 (a fresh V2 block above already contains
 # them). Each replaces its old text once; a second run finds nothing and is a no-op.
 V2_FIXES = [
-    # play_queue carries whole playlists (tens of KB) — the 1 KB login-style cap rejected them.
-    ("    async def _netease_music_body(self, request, allowed=()):",
-     "    async def _netease_music_body(self, request, allowed=(), max_bytes=1024):"),
-    ("        raw = await request.content.read(1025)\n        if len(raw) > 1024:",
-     "        raw = await request.content.read(max_bytes + 1)\n        if len(raw) > max_bytes:"),
+    # play_queue carries whole playlists (tens of KB) — the 1 KB login-style cap rejected
+    # them. The read-line fix is anchored to the whole function head: the identical read
+    # lines also exist in the login patch's _netease_body, and a bare read-line replace
+    # rewrote the wrong function (leaving it referencing max_bytes, which its signature
+    # lacks -> 500 on every login endpoint).
+    ('    async def _netease_music_body(self, request, allowed=()):\n        if request.content_type != "application/json":\n            raise web.HTTPUnsupportedMediaType(text="需要 application/json")\n        raw = await request.content.read(1025)\n        if len(raw) > 1024:',
+     '    async def _netease_music_body(self, request, allowed=(), max_bytes=1024):\n        if request.content_type != "application/json":\n            raise web.HTTPUnsupportedMediaType(text="需要 application/json")\n        raw = await request.content.read(max_bytes + 1)\n        if len(raw) > max_bytes:'),
+    # Repair devices hit by the mis-anchored fix above: their _netease_body got the
+    # max_bytes read line without the parameter. Restore the self-contained literals.
+    ('    async def _netease_body(self, request, allowed=()):\n        if request.content_type != "application/json":\n            raise web.HTTPUnsupportedMediaType(text="需要 application/json")\n        raw = await request.content.read(max_bytes + 1)\n        if len(raw) > max_bytes:',
+     '    async def _netease_body(self, request, allowed=()):\n        if request.content_type != "application/json":\n            raise web.HTTPUnsupportedMediaType(text="需要 application/json")\n        raw = await request.content.read(1025)\n        if len(raw) > 1024:'),
     ('        body, error = await self._netease_music_body(request, ("tracks", "start"))',
      '        body, error = await self._netease_music_body(request, ("tracks", "start"), max_bytes=262144)'),
     # Surface NetEase risk-control (-460) as a friendly message instead of a bare 500.
-    ("        player = self._netease_music_player()\n        await self._blocking(player.play_queue, tracks, start)\n        return self._json({\"ok\": True, \"count\": len(tracks)})",
-     "        player = self._netease_music_player()\n        try:\n            await self._blocking(player.play_queue, tracks, start)\n        except Exception as exc:\n            from plugins_func.netease import eapi\n            if isinstance(exc, eapi.NeteaseError):\n                msg = (\"网易云检测到当前网络环境存在风险，暂时无法播放，请稍后再试\"\n                       if exc.code == -460 else f\"网易云接口出错了（{exc.code}），请稍后再试\")\n                return self._error(msg, 502)\n            return self._error(f\"播放失败：{type(exc).__name__}: {exc}\"[:300], 500)\n        return self._json({\"ok\": True, \"count\": len(tracks)})"),
-    ("        player = self._netease_music_player()\n        ok = await self._blocking(player.play_at, body[\"index\"])\n        return self._json({\"ok\": bool(ok)})",
-     "        player = self._netease_music_player()\n        try:\n            ok = await self._blocking(player.play_at, body[\"index\"])\n        except Exception as exc:\n            from plugins_func.netease import eapi\n            if isinstance(exc, eapi.NeteaseError):\n                msg = (\"网易云检测到当前网络环境存在风险，暂时无法播放，请稍后再试\"\n                       if exc.code == -460 else f\"网易云接口出错了（{exc.code}），请稍后再试\")\n                return self._error(msg, 502)\n            return self._error(f\"播放失败：{type(exc).__name__}: {exc}\"[:300], 500)\n        return self._json({\"ok\": bool(ok)})"),
+    ('        player = self._netease_music_player()\n        await self._blocking(player.play_queue, tracks, start)\n        return self._json({"ok": True, "count": len(tracks)})',
+     '        player = self._netease_music_player()\n        try:\n            await self._blocking(player.play_queue, tracks, start)\n        except Exception as exc:\n            from plugins_func.netease import eapi\n            if isinstance(exc, eapi.NeteaseError):\n                msg = ("网易云检测到当前网络环境存在风险，暂时无法播放，请稍后再试"\n                       if exc.code == -460 else f"网易云接口出错了（{exc.code}），请稍后再试")\n                return self._error(msg, 502)\n            return self._error(f\"播放失败：{type(exc).__name__}: {exc}\"[:300], 500)\n        return self._json({"ok": True, "count": len(tracks)})'),
+    ('        player = self._netease_music_player()\n        ok = await self._blocking(player.play_at, body["index"])\n        return self._json({"ok": bool(ok)})',
+     '        player = self._netease_music_player()\n        try:\n            ok = await self._blocking(player.play_at, body["index"])\n        except Exception as exc:\n            from plugins_func.netease import eapi\n            if isinstance(exc, eapi.NeteaseError):\n                msg = ("网易云检测到当前网络环境存在风险，暂时无法播放，请稍后再试"\n                       if exc.code == -460 else f"网易云接口出错了（{exc.code}），请稍后再试")\n                return self._error(msg, 502)\n            return self._error(f\"播放失败：{type(exc).__name__}: {exc}\"[:300], 500)\n        return self._json({"ok": bool(ok)})'),
 ]
 
 

@@ -162,12 +162,16 @@ class TestMusicPatch(unittest.TestCase):
         self.assertIn("NETEASE_MUSIC_API_PATCH_V2", text)
 
     def test_fixes_reach_a_device_with_old_v2(self):
-        # Simulate a device that already has V1+V2 but without the play_queue body-cap fix.
+        # Simulate a device that already has V1+V2 (plus the login patch, which owns
+        # _netease_body) but none of the V2 fixes.
         import importlib.util
         spec = importlib.util.spec_from_file_location("patch_mod", PATCH)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         root, path = self.make_tree()
+        login = Path(__file__).parents[1] / "hub" / "patch" / "apply_netease_login_api.py"
+        r1 = subprocess.run([sys.executable, str(login), str(root)], capture_output=True, text=True)
+        self.assertEqual(r1.returncode, 0, r1.stderr)
         self.assertEqual(self.run_patch(root).returncode, 0)
         text = path.read_text()
         for old, new in mod.V2_FIXES:   # revert the fixes in place, like an old device
@@ -181,6 +185,9 @@ class TestMusicPatch(unittest.TestCase):
         for old, new in mod.V2_FIXES:
             self.assertIn(new, fixed)
             self.assertNotIn(old, fixed)
+        # the login patch's own body parser must be self-contained (no borrowed max_bytes)
+        self.assertIn("async def _netease_body(self, request, allowed=()):", fixed)
+        self.assertIn("raw = await request.content.read(1025)", fixed)
         self.assertEqual(self.run_patch(root).stdout.strip(), "netease music API: already")
 
 
