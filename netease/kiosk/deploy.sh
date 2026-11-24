@@ -15,12 +15,13 @@
 #
 #   CLIENT_DIR=../xiaozhi-thinksmart-client-integration ./netease/kiosk/deploy.sh
 #
-# HOST, SSH_OPTS (as ts.sh sets), OUT (build into this directory instead of a temp one),
+# HOST (default ubuntu@172.16.42.1, the USB cable; ubuntu@<Wi-Fi IP> when the device isn't on the
+# cable), SSH_OPTS (as ts.sh sets), OUT (build into this directory instead of a temp one),
 # ENV_CACHE (make-release's environment cache) and DEPLOY_KEEP=1 (keep the remote staging) change
 # the defaults.
 set -euo pipefail
 
-HOST=${HOST:-ubuntu@10.9.1.60}
+HOST=${HOST:-ubuntu@172.16.42.1}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 read -r -a SSH_OPTS <<< "${SSH_OPTS:-}"
 SSH=(ssh ${SSH_OPTS[@]+"${SSH_OPTS[@]}"})

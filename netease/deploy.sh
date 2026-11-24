@@ -1,9 +1,10 @@
 #!/bin/bash
-# Deploy the NetEase package to the hub on 10.9.1.60.
+# Deploy the NetEase package to the hub on the device (HOST defaults to the USB cable address;
+# HOST=ubuntu@<Wi-Fi IP> when the device isn't on the cable).
 # Run from anywhere: ./netease/deploy.sh
 set -euo pipefail
 
-HOST=${HOST:-ubuntu@10.9.1.60}
+HOST=${HOST:-ubuntu@172.16.42.1}
 SRV=/home/ubuntu/xiaozhi-hub-server/main/xiaozhi-server
 # The Hub runs its own virtualenv; the system python3 has no requests/aiohttp
 PYTHON=$SRV/.venv/bin/python3

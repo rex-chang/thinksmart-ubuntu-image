@@ -962,18 +962,25 @@ Boot order: Qualcomm PBL → stock SBL/aboot → lk2nd in the `boot` partition �
 
 ### USB network after flashing
 
-**Known issue: the flashed system currently can't be reached over a USB cable.** The image's USB network is already set to NCM (device `172.16.42.1`; upstream's device package defaults to RNDIS, which macOS doesn't support), but once the system is up the device's USB port isn't recognized by the computer (it doesn't show up in the computer's USB device list), and switching back to RNDIS doesn't change that: the USB port doesn't come up in device mode. Not fixed yet.
+After flashing you can log in over a USB cable (verified on macOS on 2026-11-24). The image's USB network is already set to NCM (device `172.16.42.1`; upstream's device package defaults to RNDIS, which macOS doesn't support). Plug in a data cable and the computer gets an extra network interface (on macOS it got `172.16.42.2`); if it gets no address, set `172.16.42.2` by hand as in step 3 of [A5](#a5-log-in-to-the-bootstrap-over-ssh). Then:
 
-So after flashing, connect the device to Wi-Fi and log in over its Wi-Fi address.
+```bash
+ping -c 3 172.16.42.1
+ssh -o StrictHostKeyChecking=accept-new ubuntu@172.16.42.1
+```
 
-The USB network during the bootstrap ([A5](#a5-log-in-to-the-bootstrap-over-ssh)) is **not guaranteed to work**. This section used to say it was unaffected and worked as described; measurement says otherwise: on one CD-18781Y, `ls /sys/class/udc/` was an empty directory under the bootstrap, meaning the kernel registered no USB device controller, so `usb0` could not exist and the computer saw no device at all — the same root cause as after flashing (the USB port never enters device mode). How to check and switch to Wi-Fi is in [A5](#a5-log-in-to-the-bootstrap-over-ssh).
+This address is fixed, while the router assigns and changes the Wi-Fi address, so day-to-day logins and this repository's deploy scripts default to USB.
+
+It doesn't work on every unit. This section used to say the flashed system couldn't be reached over USB: the computer didn't recognize the device's USB port (it didn't show up in the computer's USB device list), so Wi-Fi was the only way. The cause was never found, and what differs on this unit, where it works, is unknown. If it doesn't connect, get on Wi-Fi first, then run `ls /sys/class/udc/` on the device: an empty directory means this unit's USB port can't enter device mode and Wi-Fi is the only way.
+
+The USB network during the bootstrap ([A5](#a5-log-in-to-the-bootstrap-over-ssh)) is **not guaranteed to work**. This section used to say it was unaffected and worked as described; measurement says otherwise: on one CD-18781Y, `ls /sys/class/udc/` was an empty directory under the bootstrap, meaning the kernel registered no USB device controller, so `usb0` could not exist and the computer saw no device at all. How to check and switch to Wi-Fi is in [A5](#a5-log-in-to-the-bootstrap-over-ssh).
 
 ### System changes in this image
 
 Compared with the upstream image, besides dropping the Plasma desktop and booting straight into the voice interface, these changes were made (all on purpose):
 
 - No pinch zoom on the screen: the screen interface only takes the first finger, so a stray touch can't zoom the page.
-- The USB network is set to NCM instead of upstream's RNDIS (though for now the flashed system's USB port isn't recognized by computers, see the previous section).
+- The USB network is set to NCM instead of upstream's RNDIS (macOS doesn't support RNDIS); after flashing you can log in over a USB cable, see the previous section.
 - Wi-Fi power save off: this QCA9379 adapter misses DHCP replies in power save, so after a boot it took 1–3 minutes to get an IP.
 - 41 key packages held at their versions (see [section 5](#5-updates)).
 - The proximity sensor is read directly from `/dev/i2c-0` (`ubuntu` is in the `i2c` group) instead of calling sudo every second and flooding the logs.

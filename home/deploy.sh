@@ -9,10 +9,11 @@
 #   ./home/deploy.sh --intercom       also enable 可视对讲 (camera + GStreamer, tunnel keys
 #                                     under /etc/thinksmart-intercom, INTERCOM_REMOTE_HOST)
 #
-# Environment: HOST (default ubuntu@10.9.1.60), SSH_OPTS (see ts.sh), PIP_INDEX_URL.
+# Environment: HOST (default ubuntu@172.16.42.1, the USB cable; HOST=ubuntu@<Wi-Fi IP> when the
+#              device isn't on the cable), SSH_OPTS (see ts.sh), PIP_INDEX_URL.
 set -euo pipefail
 
-HOST=${HOST:-ubuntu@10.9.1.60}
+HOST=${HOST:-ubuntu@172.16.42.1}
 STAGE=/var/tmp/thinksmart-home-deploy
 VENV=/opt/thinksmart-addons/venv
 ROOT=$(cd "$(dirname "$0")/.." && pwd)

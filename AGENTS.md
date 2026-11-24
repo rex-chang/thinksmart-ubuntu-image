@@ -29,9 +29,10 @@ bash -n <改动的 .sh>
 - uv 拉依赖慢/失败时加 `UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`（同理 pip 用 `PIP_INDEX_URL`）。
 - netease 测试需要 hub 在 `PYTHONPATH`（`plugins_func` 包根），且带 requests/aiohttp/cryptography。
 
-## 部署（设备 10.9.1.60，用户 ubuntu）
+## 部署（设备 USB 地址 172.16.42.1，用户 ubuntu）
 
-- 本机没有 `~/.ssh/thinksmart_ed25519`；`ts.sh` 不可用，直接 `ssh -o BatchMode=yes ubuntu@10.9.1.60`（默认密钥已授权）。
+- 默认走 USB 线：`ssh -o BatchMode=yes ubuntu@172.16.42.1`（默认密钥已授权）。USB 地址是固定的；WiFi 地址由路由器分配、会变，旧地址 10.9.1.60 从 2026-11-24 起是别的设备，不要再连它。设备没插线时向用户要 WiFi 地址，给下面的脚本加 `HOST=ubuntu@<地址>`。
+- 本机没有 `~/.ssh/thinksmart_ed25519`，`ts.sh` 在本机不可用；下面的 deploy 脚本不用它。
 - hub 侧：`./netease/deploy.sh`（打补丁 + 重启 hub + 自检）。
 - 应用/系统层：`PIP_INDEX_URL=… ./home/deploy.sh`（经设备上的 `thinksmart-update system-apply` 安装，可选 `--airplay`/`--intercom`）。
 - **部署脚本必须在 macOS 自带 bash 3.2 下可跑**：空数组展开用 `${ARR[@]+"${ARR[@]}"}` 惯用法。

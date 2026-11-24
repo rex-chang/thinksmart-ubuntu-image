@@ -27,7 +27,8 @@ tree: only tracked files are packaged, so untracked files would otherwise vanish
 version in `thinksmart_client/__init__.py` must be newer than what the device runs; the updater
 refuses equal or older versions.
 
-Other variables: `HOST` (default `ubuntu@10.9.1.60`), `SSH_OPTS` (as `ts.sh` sets it),
+Other variables: `HOST` (default `ubuntu@172.16.42.1`, the USB cable; `ubuntu@<Wi-Fi IP>` when the
+device isn't on the cable), `SSH_OPTS` (as `ts.sh` sets it),
 `OUT` (build the release into this directory instead of a temporary one),
 `ENV_CACHE` (make-release's Python environment cache, default
 `~/.cache/thinksmart-release/envs`) and `DEPLOY_KEEP=1` (keep the remote staging).
